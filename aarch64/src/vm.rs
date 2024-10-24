@@ -48,6 +48,10 @@ impl Page4K {
             core::intrinsics::volatile_set_memory(&mut self.0, 0u8, 1);
         }
     }
+
+    pub fn data(&mut self) -> &mut [u8] {
+        &mut self.0
+    }
 }
 
 #[derive(Debug, IntoPrimitive, FromPrimitive)]
