@@ -109,7 +109,7 @@ fn earlyvm_pages_physrange() -> PhysRange {
 pub extern "C" fn init_vm(dtb_pa: u64) {
     // Parse the DTB before we set up memory so we can correctly map it
     let dt = unsafe { DeviceTree::from_usize(dtb_pa as usize).unwrap() };
-    let dtb_physrange = PhysRange::with_pa_len(PhysAddr::new(dtb_pa), dt.size());
+    let dtb_physrange = PhysRange::with_len(dtb_pa, dt.size());
 
     putstr("\nvminit:init_vm: calling init_kernel_page_tables\n");
 
@@ -137,7 +137,7 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
 
     let (root_page_table_pa, root_page_table) =
         if let Ok(page_pa) = physpage_allocator.alloc_physpage() {
-            (page_pa, unsafe { &mut *(page_pa.0 as *mut RootPageTable) })
+            (page_pa, unsafe { &mut *(page_pa.addr() as *mut RootPageTable) })
         } else {
             putstr("error:vminit:init_vm: failed to alloc root_kernelpt4\n");
             panic!();

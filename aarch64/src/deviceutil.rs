@@ -4,7 +4,8 @@ use port::mem::{PhysRange, VirtRange};
 use crate::vm::{PhysPageAllocator, VmTraitImpl};
 use crate::{pagealloc, vm};
 
-/// Map a device register to device memory
+/// Map a device register to device memory.
+/// The register may not be aligned, but the mapping will ensure the page is.
 /// TODO Maybe make this a macro and wrap the error reporting?
 pub fn map_device_register(
     id: &'static str,

@@ -1,12 +1,12 @@
-use core::ptr::NonNull;
-
 use crate::deviceutil::{self, map_device_register};
 use crate::io::{read_reg, write_reg};
 use crate::vm;
+use core::ptr::NonNull;
 use port::Result;
 use port::fdt::DeviceTree;
 use port::mcslock::{Lock, LockNode};
 use port::mem::{PhysAddr, PhysRange, VirtRange};
+use port::memdump::{Format, SegmentSize, memdump_ptr};
 
 #[cfg(not(test))]
 use port::println;
@@ -140,6 +140,8 @@ where
     U: Copy,
 {
     let size = size_of::<Message<T, U>>() as u32;
+    // let req = Request::<Tag<T>> { size, code, tags: *tags };
+    // let mut msg = MessageWithTags { request: req };
     let node = LockNode::new();
     MAILBOX
         .lock(&node)
@@ -155,7 +157,37 @@ where
                 msg
             };
 
+            // println!(
+            //     ">>>>msgaddr: {:0x?} bufaddr: {:0x} a:{:0x?} x:{:p} xx:{:p}",
+            //     ptr::addr_of!(msg),
+            //     mb.req_buffer.start(),
+            //     a,
+            //     x,
+            //     xx
+            // );
+            let _size = size_of::<Tag<T>>();
+            println!("addr:{tags:p}");
+            //memdump(unsafe { ptr::addr_of!(tags) as usize }, size, Format::Hex, SegmentSize::Size8);
+            memdump_ptr(tags, Format::Hex, SegmentSize::Size8);
+
+            //println!("tag_code0 (1): {:#x}", unsafe { msg.response.tags.tag_code0 });
             mb.request();
+            // mb.request(&mut msg);
+            // dmb(ISH);
+            // delay(150);
+            //unsafe {
+            // let reqaddr = ptr::addr_of!(msg.request);
+            // let respaddr = ptr::addr_of!(msg.response);
+            // memdump(reqaddr as usize, 20, Format::Hex, SegmentSize::Size64);
+            // memdump(reqaddr as usize, 8, Format::Hex, SegmentSize::Size8);
+            // memdump(reqaddr as usize, 16, Format::Hex, SegmentSize::Size8);
+            // memdump(reqaddr as usize, 20, Format::Hex, SegmentSize::Size8);
+            // memdump(reqaddr as usize, 1, Format::Hex, SegmentSize::Size64);
+            // memdump(reqaddr as usize, 8, Format::Hex, SegmentSize::Size64);
+            // println!("req addr: {:?}", reqaddr);
+            // println!("resp addr: {:?}", respaddr);
+            //}
+            // println!("tag_code0 (2): {:#x}", unsafe { msg.response.tags.tag_code0 });
             unsafe { msg.response.tags.body }
         })
         .expect("mailbox not initialised")
@@ -286,6 +318,8 @@ pub fn get_board_revision() -> u32 {
         body: EmptyRequest {},
         end_tag: 0,
     };
+    println!("tags:{:?}", tags);
+
     request::<_, u32>(0, &tags)
 }
 

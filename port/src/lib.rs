@@ -15,6 +15,8 @@ pub mod fdt;
 pub mod maths;
 pub mod mcslock;
 pub mod mem;
+pub mod memdump;
 pub mod pagealloc;
+pub mod timer;
 
 pub type Result<T> = core::result::Result<T, &'static str>;

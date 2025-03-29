@@ -1,4 +1,4 @@
-#![allow(non_upper_case_globals)]
+#![allow(non_upper_case_globals, dead_code)]
 
 /// Recursive page table implementation for aarch64.
 /// Note that currently there are a lot of assumptions that we're dealing with

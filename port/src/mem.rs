@@ -17,28 +17,32 @@ pub struct VirtRange {
 }
 
 impl VirtRange {
-    pub fn new(start: usize, end: usize) -> Self {
+    pub const fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
 
-    pub fn with_len(start: usize, len: usize) -> Self {
+    pub const fn with_len(start: usize, len: usize) -> Self {
         Self { start, end: start + len }
     }
 
-    pub fn from_physrange(pr: PhysRange, offset: usize) -> Self {
+    pub const fn from_physrange(pr: PhysRange, offset: usize) -> Self {
         Self { start: pr.start.0 as usize + offset, end: pr.end.0 as usize + offset }
     }
 
-    pub fn offset_addr(&self, offset: usize) -> Option<usize> {
+    pub const fn empty() -> Self {
+        Self { start: 0, end: 0 }
+    }
+
+    pub const fn offset_addr(&self, offset: usize) -> Option<usize> {
         let addr = self.start + offset;
         if self.contains(addr) { Some(addr) } else { None }
     }
 
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         self.end - self.start
     }
 
-    pub fn contains(&self, addr: usize) -> bool {
+    pub const fn contains(&self, addr: usize) -> bool {
         addr >= self.start && addr < self.end
     }
 }
@@ -60,6 +64,12 @@ impl fmt::Display for VirtRange {
 #[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 #[repr(transparent)]
 pub struct PhysAddr(pub u64);
+
+impl core::fmt::LowerHex for PhysAddr {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:#016x}", self.0)
+    }
+}
 
 impl PhysAddr {
     pub const fn new(value: u64) -> Self {
@@ -90,6 +100,14 @@ impl ops::Add<u64> for PhysAddr {
 
     fn add(self, offset: u64) -> PhysAddr {
         PhysAddr(self.0 + offset)
+    }
+}
+
+impl ops::Sub<PhysAddr> for PhysAddr {
+    type Output = u64;
+
+    fn sub(self, other: PhysAddr) -> u64 {
+        self.0 - other.0
     }
 }
 
@@ -128,19 +146,19 @@ pub struct PhysRange {
 }
 
 impl PhysRange {
-    pub fn new(start: PhysAddr, end: PhysAddr) -> Self {
+    pub const fn new(start: PhysAddr, end: PhysAddr) -> Self {
         Self { start, end }
     }
 
-    pub fn with_end(start: u64, end: u64) -> Self {
+    pub const fn with_end(start: u64, end: u64) -> Self {
         Self { start: PhysAddr(start), end: PhysAddr(end) }
     }
 
-    pub fn with_len(start: u64, len: usize) -> Self {
+    pub const fn with_len(start: u64, len: usize) -> Self {
         Self { start: PhysAddr(start), end: PhysAddr(start + len as u64) }
     }
 
-    pub fn with_pa_len(start: PhysAddr, len: usize) -> Self {
+    pub const fn with_pa_len(start: PhysAddr, len: usize) -> Self {
         Self { start, end: PhysAddr(start.0 + len as u64) }
     }
 
@@ -150,7 +168,7 @@ impl PhysRange {
         if self.contains(addr) { Some(addr) } else { None }
     }
 
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         (self.end.addr() - self.start.addr()) as usize
     }
 
@@ -165,7 +183,7 @@ impl PhysRange {
     }
 
     /// Round extents so that start and end lie on multiples of step_size
-    pub fn round(&self, step_size: usize) -> Self {
+    pub const fn round(&self, step_size: usize) -> Self {
         Self {
             start: self.start.round_down2(step_size as u64),
             end: self.end.round_up2(step_size as u64),

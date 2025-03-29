@@ -13,7 +13,9 @@ mod devcons;
 mod node0;
 mod pio;
 mod proc;
+mod process;
 mod syscall;
+mod timer;
 mod trap;
 mod uart16550;
 mod vsvm;
@@ -46,6 +48,7 @@ pub extern "C" fn main(mach: &mut dat::Mach, _mbdata: u64) {
     syscall::init();
     let x = trap::splhi();
     devcons::init();
+    timer::X86_64Timer::init();
     println!();
     println!("r9 from the Internet");
     println!("looping now");
