@@ -100,9 +100,7 @@ fn print_stacks() {
 
     let interrupt_stack_base = unsafe { interruptstackbase.as_ptr().addr() };
     let interrupt_stack_max = interrupt_stack_base + unsafe { interruptstacksz.as_ptr().addr() };
-    let range = VirtRange(interrupt_stack_base..interrupt_stack_max);
-    let range_size = range.size();
-    println!("Interrupt stack:\t {range} ({range_size:#x})");
+    println!("Interrupt stack: {:018x}..{:018x}", interrupt_stack_base, interrupt_stack_max);
 }
 
 /// dtb_va is the virtual address of the DTB structure.  The physical address is
