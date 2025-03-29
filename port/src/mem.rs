@@ -1,6 +1,5 @@
 use crate::{fdt::RegBlock, maths};
 use core::{
-    cmp::{max, min},
     fmt,
     iter::{Step, StepBy},
     ops::{self, Range},
@@ -61,6 +60,12 @@ impl fmt::Display for VirtRange {
 #[repr(transparent)]
 pub struct PhysAddr(pub u64);
 
+impl core::fmt::LowerHex for PhysAddr {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:#016x}", self.0)
+    }
+}
+
 impl PhysAddr {
     pub const fn new(value: u64) -> Self {
         PhysAddr(value)
@@ -90,6 +95,14 @@ impl ops::Add<u64> for PhysAddr {
 
     fn add(self, offset: u64) -> PhysAddr {
         PhysAddr(self.0 + offset)
+    }
+}
+
+impl ops::Sub<PhysAddr> for PhysAddr {
+    type Output = u64;
+
+    fn sub(self, other: PhysAddr) -> u64 {
+        self.0 - other.0
     }
 }
 
@@ -142,6 +155,20 @@ impl PhysRange {
 
     pub fn with_pa_len(start: PhysAddr, len: usize) -> Self {
         Self { start, end: PhysAddr(start.0 + len as u64) }
+    pub const fn new(start: PhysAddr, end: PhysAddr) -> Self {
+        Self(start..end)
+    }
+
+    pub const fn new_u64(start: u64, end: u64) -> Self {
+        Self(PhysAddr(start)..PhysAddr(end))
+    }
+
+    pub const fn empty() -> Self {
+        Self(PhysAddr(0)..PhysAddr(0))
+    }
+
+    pub fn with_len(start: PhysAddr, len: usize) -> Self {
+        Self::new(start, start + len as u64)
     }
 
     #[allow(dead_code)]

@@ -86,7 +86,7 @@ pub fn allocate_virtpage(
     pgtype: RootPageTableType,
 ) -> Result<&'static mut VirtPage4K, PageAllocError> {
     let page_pa = allocate_physpage()?;
-    let range = PhysRange::with_pa_len(page_pa, PAGE_SIZE_4K);
+    let range = PhysRange::with_len(page_pa, PAGE_SIZE_4K);
 
     let mut physpage_allocator = PhysPageAllocator {};
     let mut vmtrait_impl = VmTraitImpl {};

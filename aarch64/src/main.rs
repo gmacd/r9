@@ -1,9 +1,10 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::upper_case_acronyms)]
-#![allow(internal_features)]
+#![allow(internal_features, dead_code)]
 #![cfg_attr(not(any(test)), no_std)]
 #![cfg_attr(not(test), no_main)]
 #![cfg_attr(not(test), feature(alloc_error_handler))]
+#![feature(breakpoint)]
 #![feature(core_intrinsics)]
 #![feature(sync_unsafe_cell)]
 #![forbid(unsafe_op_in_unsafe_fn)]
@@ -11,14 +12,18 @@
 mod allocator;
 mod devcons;
 mod deviceutil;
+mod generic_timer;
+mod gic;
 mod io;
 mod kmem;
 mod mailbox;
 mod pagealloc;
 mod param;
 mod pre_mmu;
+mod process;
 mod registers;
 mod swtch;
+mod timer;
 mod trap;
 mod uartmini;
 mod uartpl011;
@@ -31,7 +36,8 @@ use alloc::boxed::Box;
 use core::ptr::null_mut;
 use param::KZERO;
 use port::fdt::DeviceTree;
-use port::mem::{PhysAddr, PhysRange, VirtRange};
+use port::mem::{PhysAddr, PhysRange};
+use port::memdump::{Format, SegmentSize, memdump};
 use port::println;
 use vm::{Entry, RootPageTableType, VaMapping};
 
@@ -71,7 +77,7 @@ fn print_pi_name(board_revision: u32) {
     let name = match board_revision {
         0xa21041 => "Raspberry Pi 2B",
         0xa02082 => "Raspberry Pi 3B",
-        0xb03115 => "Raspberry Pi 4B",
+        0xb03115 | 0xd03114 => "Raspberry Pi 4B",
         0xa220a0 => "Raspberry Compute Module 3",
         _ => "Unrecognised",
     };
@@ -114,7 +120,7 @@ pub extern "C" fn main9(dtb_va: usize) {
 
     // Parse the DTB before we set up memory so we can correctly map it
     let dt = unsafe { DeviceTree::from_usize(dtb_va).unwrap() };
-    let dtb_physrange = PhysRange::with_pa_len(PhysAddr::new((dtb_va - KZERO) as u64), dt.size());
+    let dtb_physrange = PhysRange::with_len(PhysAddr::new((dtb_va - KZERO) as u64), dt.size());
 
     // Set up page allocator
     let mut physranges = [
@@ -135,13 +141,14 @@ pub extern "C" fn main9(dtb_va: usize) {
     println!("r9 from the Internet");
     println!("DTB found at: {:#x}", dtb_va);
     println!("midr_el1: {:?}", registers::MidrEl1::read());
-
     print_stacks();
-
     print_binary_sections();
-
     print_board_info();
     print_memory_info();
+
+    gic::init(&dt);
+    timer::AArch64Timer::init();
+    // gic::init_timer_test();
 
     // vmdebug::print_recursive_tables(RootPageTableType::Kernel);
     // vmdebug::print_recursive_tables(RootPageTableType::User);
@@ -179,12 +186,20 @@ pub extern "C" fn main9(dtb_va: usize) {
 
     test_sysexit();
 
-    vmdebug::print_recursive_tables(RootPageTableType::Kernel);
-    vmdebug::print_recursive_tables(RootPageTableType::User);
+    // vmdebug::print_recursive_tables(RootPageTableType::Kernel);
+    // vmdebug::print_recursive_tables(RootPageTableType::User);
 
     let _b = Box::new("ddododo");
 
     println!("looping now");
+
+    // memdump(0xffff80000082c860, 4, Format::Hex, SegmentSize::Size8);
+    // memdump(0xffff80000082c860, 8, Format::Hex, SegmentSize::Size8);
+    // memdump(0xffff80000082c860, 16, Format::Hex, SegmentSize::Size8);
+    // memdump(0xffff80000082c860, 20, Format::Hex, SegmentSize::Size8);
+    // memdump(0xffff80000082c860, 1, Format::Hex, SegmentSize::Size64);
+    // memdump(0xffff80000082c860, 8, Format::Hex, SegmentSize::Size64);
+    // memdump(0xffff80000082c868, 8, Format::Hex, SegmentSize::Size64);
 
     #[allow(clippy::empty_loop)]
     loop {}

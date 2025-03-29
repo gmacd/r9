@@ -1,12 +1,12 @@
-use core::ptr::NonNull;
-
 use crate::deviceutil::{self, map_device_register};
 use crate::io::{read_reg, write_reg};
 use crate::vm;
+use core::ptr::{self, NonNull};
 use port::Result;
 use port::fdt::DeviceTree;
 use port::mcslock::{Lock, LockNode};
 use port::mem::{PhysAddr, PhysRange, VirtRange};
+use port::memdump::{Format, SegmentSize, memdump_ptr};
 
 #[cfg(not(test))]
 use port::println;
@@ -74,19 +74,21 @@ impl Mailbox {
 
     fn request(&self) {
         // Read status register until full flag not set
-        while (read_reg(&self.mbox_virtrange, MBOX_STATUS) & MBOX_FULL) != 0 {}
+        while (read_reg(self.mbox_virtrange.clone(), MBOX_STATUS) & MBOX_FULL) != 0 {}
 
         // Write the request address combined with the channel to the write register
         let channel = ChannelId::ArmToVc as u32;
         let uart_mbox_u32 = self.req_buffer_pa.start.addr() as u32;
+        let uart_mbox_u32 = self.req_buffer_pa.0.start.addr() as u32;
         let r = (uart_mbox_u32 & !0xF) | channel;
-        write_reg(&self.mbox_virtrange, MBOX_WRITE, r);
+        write_reg(self.mbox_virtrange.clone(), MBOX_WRITE, r);
 
         // Wait for response
         // FIXME: two infinite loops - could go awry
         loop {
-            while (read_reg(&self.mbox_virtrange, MBOX_STATUS) & MBOX_EMPTY) != 0 {}
-            let response = read_reg(&self.mbox_virtrange, MBOX_READ);
+            while (read_reg(self.mbox_virtrange.clone(), MBOX_STATUS) & MBOX_EMPTY) != 0 {}
+            let response = read_reg(self.mbox_virtrange.clone(), MBOX_READ);
+            // println!("response: {response:#x}");
             if response == r {
                 break;
             }
@@ -140,6 +142,8 @@ where
     U: Copy,
 {
     let size = size_of::<Message<T, U>>() as u32;
+    // let req = Request::<Tag<T>> { size, code, tags: *tags };
+    // let mut msg = MessageWithTags { request: req };
     let node = LockNode::new();
     MAILBOX
         .lock(&node)
@@ -155,7 +159,37 @@ where
                 msg
             };
 
+            // println!(
+            //     ">>>>msgaddr: {:0x?} bufaddr: {:0x} a:{:0x?} x:{:p} xx:{:p}",
+            //     ptr::addr_of!(msg),
+            //     mb.req_buffer.start(),
+            //     a,
+            //     x,
+            //     xx
+            // );
+            let size = size_of::<Tag<T>>();
+            println!("addr:{tags:p}");
+            //memdump(unsafe { ptr::addr_of!(tags) as usize }, size, Format::Hex, SegmentSize::Size8);
+            memdump_ptr(tags, Format::Hex, SegmentSize::Size8);
+
+            //println!("tag_code0 (1): {:#x}", unsafe { msg.response.tags.tag_code0 });
             mb.request();
+            // mb.request(&mut msg);
+            // dmb(ISH);
+            // delay(150);
+            unsafe {
+                let reqaddr = ptr::addr_of!(msg.request);
+                let respaddr = ptr::addr_of!(msg.response);
+                // memdump(reqaddr as usize, 20, Format::Hex, SegmentSize::Size64);
+                // memdump(reqaddr as usize, 8, Format::Hex, SegmentSize::Size8);
+                // memdump(reqaddr as usize, 16, Format::Hex, SegmentSize::Size8);
+                // memdump(reqaddr as usize, 20, Format::Hex, SegmentSize::Size8);
+                // memdump(reqaddr as usize, 1, Format::Hex, SegmentSize::Size64);
+                // memdump(reqaddr as usize, 8, Format::Hex, SegmentSize::Size64);
+                // println!("req addr: {:?}", reqaddr);
+                // println!("resp addr: {:?}", respaddr);
+            }
+            // println!("tag_code0 (2): {:#x}", unsafe { msg.response.tags.tag_code0 });
             unsafe { msg.response.tags.body }
         })
         .expect("mailbox not initialised")
@@ -286,6 +320,8 @@ pub fn get_board_revision() -> u32 {
         body: EmptyRequest {},
         end_tag: 0,
     };
+    println!("tags:{:?}", tags);
+
     request::<_, u32>(0, &tags)
 }
 

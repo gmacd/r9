@@ -1,5 +1,7 @@
 //!! Debug tools for VM code
 
+#![allow(dead_code)]
+
 #[cfg(not(test))]
 use port::println;
 

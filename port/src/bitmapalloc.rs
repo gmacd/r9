@@ -356,14 +356,14 @@ mod tests {
         // 2 bitmaps, 2 bytes per bitmap, mapped to pages of 4 bytes
         // 32 bits, 128 bytes physical memory
         let mut alloc = BitmapPageAlloc::<2, 2>::new_all_allocated(4);
-        alloc.mark_free(&PhysRange::with_end(0, alloc.max_bytes() as u64))?;
+        alloc.mark_free(&PhysRange::new_u64(0, alloc.max_bytes() as u64))?;
 
         // Mark a range as allocated - 10 bits
-        alloc.mark_allocated(&PhysRange::with_end(4, 44))?;
+        alloc.mark_allocated(&PhysRange::new_u64(4, 44))?;
         assert_eq!(alloc.bytes(), [0xfe, 0x07, 0x00, 0x00]);
 
         // Deallocate a range - first 2 bits
-        alloc.mark_free(&PhysRange::with_end(0, 8))?;
+        alloc.mark_free(&PhysRange::new_u64(0, 8))?;
         assert_eq!(alloc.bytes(), [0xfc, 0x07, 0x00, 0x00]);
         Ok(())
     }
@@ -374,11 +374,11 @@ mod tests {
         // 2 bitmaps, 2 bytes per bitmap, mapped to pages of 4 bytes
         // 32 bits, 128 bytes physical memory
         let mut alloc = BitmapPageAlloc::<2, 2>::new_all_allocated(4);
-        alloc.mark_free(&PhysRange::with_end(0, alloc.max_bytes() as u64))?;
+        alloc.mark_free(&PhysRange::new_u64(0, alloc.max_bytes() as u64))?;
         assert_eq!(alloc.usage_bytes(), (0, 128));
 
         // Mark a range as allocated - 10 bits
-        alloc.mark_allocated(&PhysRange::with_end(4, 44))?;
+        alloc.mark_allocated(&PhysRange::new_u64(4, 44))?;
         assert_eq!(alloc.usage_bytes(), (40, 128));
         assert_eq!(alloc.bytes(), [0xfe, 0x07, 0x00, 0x00]);
 

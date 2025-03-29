@@ -7,8 +7,10 @@
 
 mod allocator;
 mod platform;
+mod process;
 mod runtime;
 mod sbi;
+mod timer;
 mod uart16550;
 
 use port::println;
@@ -24,6 +26,7 @@ pub extern "C" fn main9(hartid: usize, dtb_ptr: usize) -> ! {
     let dt = unsafe { DeviceTree::from_usize(dtb_ptr).unwrap() };
     crate::devcons::init(&dt);
     platform_init();
+    timer::RISCvTimer::init();
 
     println!();
     println!("r9 from the Internet");
