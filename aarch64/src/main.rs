@@ -3,6 +3,7 @@
 #![cfg_attr(not(any(test)), no_std)]
 #![cfg_attr(not(test), no_main)]
 #![feature(alloc_error_handler)]
+#![feature(breakpoint)]
 #![feature(core_intrinsics)]
 #![feature(sync_unsafe_cell)]
 #![forbid(unsafe_op_in_unsafe_fn)]
@@ -10,6 +11,7 @@
 mod allocator;
 mod devcons;
 mod deviceutil;
+mod gic;
 mod io;
 mod kmem;
 mod mailbox;
@@ -30,6 +32,7 @@ use core::ptr::null_mut;
 use kmem::{boottext_range, bss_range, data_range, rodata_range, text_range, total_kernel_range};
 use param::KZERO;
 use port::mem::{PhysRange, VirtRange};
+use port::memdump::{Format, SegmentSize, memdump};
 use port::println;
 use port::{fdt::DeviceTree, mem::PhysAddr};
 use vm::{Entry, RootPageTableType, VaMapping};
@@ -117,6 +120,9 @@ pub extern "C" fn main9(dtb_va: usize) {
     println!("DTB found at: {:#x}", dtb_va);
     println!("midr_el1: {:?}", registers::MidrEl1::read());
 
+    // println!("Early pagetables");
+    // vmdebug::print_recursive_tables(RootPageTableType::Kernel);
+
     print_stacks();
 
     print_binary_sections();
@@ -136,6 +142,8 @@ pub extern "C" fn main9(dtb_va: usize) {
 
     devcons::init(&dt, false);
     mailbox::init(&dt);
+    //gic::init(&dt);
+    // gic::inittest();
 
     print_board_info();
     print_memory_info();
@@ -169,14 +177,22 @@ pub extern "C" fn main9(dtb_va: usize) {
 
     println!("Set up a user process");
 
-    test_sysexit();
+    // test_sysexit();
 
-    vmdebug::print_recursive_tables(RootPageTableType::Kernel);
-    vmdebug::print_recursive_tables(RootPageTableType::User);
+    // vmdebug::print_recursive_tables(RootPageTableType::Kernel);
+    // vmdebug::print_recursive_tables(RootPageTableType::User);
 
     let _b = Box::new("ddododo");
 
     println!("looping now");
+
+    // memdump(0xffff80000082c860, 4, Format::Hex, SegmentSize::Size8);
+    // memdump(0xffff80000082c860, 8, Format::Hex, SegmentSize::Size8);
+    // memdump(0xffff80000082c860, 16, Format::Hex, SegmentSize::Size8);
+    // memdump(0xffff80000082c860, 20, Format::Hex, SegmentSize::Size8);
+    // memdump(0xffff80000082c860, 1, Format::Hex, SegmentSize::Size64);
+    memdump(0xffff80000082c860, 8, Format::Hex, SegmentSize::Size64);
+    // memdump(0xffff80000082c868, 8, Format::Hex, SegmentSize::Size64);
 
     #[allow(clippy::empty_loop)]
     loop {}

@@ -1,6 +1,7 @@
-use core::fmt;
+use core::{arch::asm, fmt};
 
 use crate::registers::EsrEl1;
+use bitstruct::bitstruct;
 use port::println;
 
 #[cfg(not(test))]
@@ -56,7 +57,7 @@ pub struct TrapFrame {
     esr_el1: EsrEl1,
     elr_el1: u64,
     far_el1: u64,
-    interrupt_type: u64,
+    interrupt_type: InterruptType, // Could just be u8 if we need to fit anything else
 }
 
 impl fmt::Debug for TrapFrame {
@@ -94,9 +95,9 @@ impl fmt::Debug for TrapFrame {
             .field("x29 (frame_pointer)", &format_args!("{:#018x}", self.frame_pointer))
             .field("x30 (link_register)", &format_args!("{:#018x}", self.link_register))
             .field("esr_el1", &format_args!("{:#?}", self.esr_el1))
-            .field("elr_el1", &format_args!("{:#018?}", self.elr_el1))
-            .field("far_el1", &format_args!("{:#018?}", self.far_el1))
-            .field("interrupt_type", &format_args!("{}", self.interrupt_type))
+            .field("elr_el1", &format_args!("{:#018x}", self.elr_el1))
+            .field("far_el1", &format_args!("{:#018x}", self.far_el1))
+            .field("interrupt_type", &format_args!("{:?}", self.interrupt_type))
             .finish()
     }
 }
@@ -107,16 +108,84 @@ pub extern "C" fn trap_unsafe(frame: *mut TrapFrame) {
 }
 
 fn trap(frame: &mut TrapFrame) {
+    // Handle syscalls
     if frame.esr_el1.ec() == 0x15 {
-        // Syscall
         let syscallid = frame.esr_el1.iss();
         println!("Syscall {syscallid}");
-    } else {
-        println!("{:#?}", frame);
-        println!("Unhandled interrupt");
+
+        // Just loop for now..
+        loop {
+            core::hint::spin_loop();
+        }
     }
 
+    match frame.interrupt_type {
+        InterruptType::IrqInvalidEl1h => {
+            // let int_id = GiccIar::read().int_id();
+            // println!("Caught IRQ {int_id}");
+            loop {
+                core::hint::spin_loop();
+            }
+        }
+        _ => {}
+    }
+
+    println!("{:#?}", frame);
+    println!("Unhandled interrupt");
     loop {
         core::hint::spin_loop();
     }
 }
+
+#[repr(u64)]
+#[derive(Debug)]
+enum InterruptType {
+    SyncInvalidEl1t = 0,
+    IrqInvalidEl1t = 1,
+    FiqInvalidEl1t = 2,
+    ErrorInvalidEl1t = 3,
+
+    SyncInvalidEl1h = 4,
+    IrqInvalidEl1h = 5,
+    FiqInvalidEl1h = 6,
+    ErrorInvalidEl1h = 7,
+
+    SyncInvalidEl064 = 8,
+    IrqInvalidEl064 = 9,
+    FiqInvalidEl064 = 10,
+    ErrorInvalidEl064 = 11,
+
+    SyncInvalidEl032 = 12,
+    IrqInvalidEl032 = 13,
+    FiqInvalidEl032 = 14,
+    ErrorInvalidEl032 = 15,
+}
+
+// TODO to be used for GIC3.
+// The qemu raspi* machines don't support GIC3, only GIC2.
+// However the real hardware does.  When we want to implement support
+// we can test with the 'virt' machine, using '-M virt,gic-version=3'
+/*
+bitstruct! {
+    #[derive(Copy, Clone, PartialEq)]
+    #[repr(transparent)]
+    pub struct IccIar1El1(pub u64) {
+        pub int_id: u32 = 0..24;
+        res: u64 = 24..64;
+    }
+}
+
+impl IccIar1El1 {
+    pub fn read() -> Self {
+        Self(if cfg!(test) {
+            0
+        } else {
+            unsafe {
+                let mut value: u64;
+                asm!("mrs {value}, ICC_IAR1_EL1", value = out(reg) value);
+                value
+            }
+        })
+    }
+}
+*/

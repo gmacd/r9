@@ -40,7 +40,9 @@ pub fn init(dt: &DeviceTree, is_early_init: bool) {
         // return None and hope that things work out regardless
         match uart {
             Ok(uart) => {
-                uart.init();
+                if !is_early_init {
+                    //uart.init();
+                }
 
                 static UART: SyncUnsafeCell<MaybeUninit<MiniUart>> =
                     SyncUnsafeCell::new(MaybeUninit::uninit());
