@@ -68,9 +68,6 @@ impl<'a> DeviceTree<'a> {
     }
 
     /// Given a pointer to the dtb as a usize, return a DeviceTree struct.
-    ///
-    /// # Safety
-    /// The caller must ensure that `ptr` is a valid virtual address.
     pub unsafe fn from_usize(ptr: usize) -> Result<Self> {
         let u8ptr = ptr as *const mem::MaybeUninit<u8>;
 

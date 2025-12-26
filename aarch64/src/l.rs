@@ -4,6 +4,9 @@
 use core::ops::{BitAndAssign, BitOrAssign};
 use core::ptr::{read_volatile, write_volatile};
 
+use port::fdt::DeviceTree;
+use port::mem::{PhysAddr, PhysRange};
+
 const MMIO_BASE: u32 = 0xfe000000;
 const AUX: u32 = MMIO_BASE + 0x00215000;
 const AUX_ENABLES: u32 = AUX + 0x04;
@@ -20,6 +23,13 @@ const AUX_MU_BAUD: u32 = AUX_MU + 0x28;
 const GPIO: u32 = MMIO_BASE + 0x00200000;
 const GPFSEL1: u32 = GPIO + 0x04;
 const GPIO_PUP_PDN_CNTRL_REG0: u32 = GPIO + 0xe4;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn init_vm(dtb_pa: u64) {
+    // Parse the DTB before we set up memory so we can correctly map it
+    let dt = unsafe { DeviceTree::from_usize(dtb_pa as usize).unwrap() };
+    let dtb_physrange = PhysRange::with_pa_len(PhysAddr::new(dtb_pa), dt.size());
+}
 
 // Set up a very early uart - the miniuart.  The full driver is in
 // uartmini.rs.  This code is just enough to help debug the early stage.

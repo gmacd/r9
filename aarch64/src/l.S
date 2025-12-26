@@ -110,7 +110,7 @@ start:
 	// used again.  There's also a couple that are best avoided out of
 	// principle.
 
-	// x27: DTB address
+	// x27: DTB address (physical address)
 	// x28: Entrypoint address
 	// x29: Frame pointer
 	// x30: Link register
@@ -187,6 +187,9 @@ el1:	// In EL1
 
 	mov	x0, #'.'
 	bl	init_early_uart_putc
+
+	mov	x0, x27			// DTB pointer
+	bl	init_vm
 
 	// AArch64 memory management examples
 	//  https://developer.arm.com/documentation/102416/0100
