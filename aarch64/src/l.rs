@@ -84,6 +84,7 @@ pub extern "C" fn init_early_uart_rpi4() {
     }
 }
 
+// Extern no mangle so we can call from asm if necessary
 #[unsafe(no_mangle)]
 pub extern "C" fn init_early_uart_putc(b: u8) {
     unsafe {
@@ -91,6 +92,12 @@ pub extern "C" fn init_early_uart_putc(b: u8) {
             core::hint::spin_loop();
         }
         write_volatile(AUX_MU_IO as *mut u32, b as u32);
+    }
+}
+
+pub fn init_early_uart_putstr(s: &str) {
+    for b in s.bytes() {
+        init_early_uart_putc(b);
     }
 }
 
