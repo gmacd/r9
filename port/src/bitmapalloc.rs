@@ -100,8 +100,8 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
     /// upper bound of the allocator.
     pub fn free_unused_ranges<'a>(
         &mut self,
-        available_mem: &PhysRange,
-        used_ranges: impl Iterator<Item = &'a PhysRange>,
+        available_mem: PhysRange,
+        used_ranges: impl Iterator<Item = PhysRange>,
     ) -> Result<(), PageAllocError> {
         let mut next_start = available_mem.start();
         for range in used_ranges {

@@ -8,12 +8,13 @@
 /// 2. `free_unused_ranges` to mark available ranges as the inverse of the
 ///    physical memory map within the bounds of the available memory.
 use crate::kmem;
-use crate::pagealloc;
 use crate::vm::Entry;
+use crate::vm::PhysPageAllocator;
 use crate::vm::RootPageTable;
 use crate::vm::RootPageTableType;
 use crate::vm::VaMapping;
 use crate::vm::VirtPage4K;
+use crate::vm::VmGuts;
 use port::bitmapalloc::BitmapPageAlloc;
 use port::mem::PhysAddr;
 use port::mem::PhysRange;
@@ -53,8 +54,8 @@ pub fn init_page_allocator() {
 /// Free unused pages in mem that aren't covered by the memory map.  Assumes
 /// that custom_map is sorted.
 pub fn free_unused_ranges<'a>(
-    available_mem: &PhysRange,
-    used_ranges: impl Iterator<Item = &'a PhysRange>,
+    available_mem: PhysRange,
+    used_ranges: impl Iterator<Item = PhysRange>,
 ) -> Result<(), PageAllocError> {
     let node = LockNode::new();
     let mut lock = PAGE_ALLOC.lock(&node);
@@ -97,8 +98,13 @@ pub fn allocate_virtpage(
 ) -> Result<&'static mut VirtPage4K, PageAllocError> {
     let page_pa = allocate_physpage()?;
     let range = PhysRange::with_pa_len(page_pa, PAGE_SIZE_4K);
+
+    let mut physpage_allocator = PhysPageAllocator {};
+    let mut vm_guts = VmGuts {};
+
     if let Ok(page_va) = page_table.map_phys_range(
-        pagealloc::allocate_physpage,
+        &mut physpage_allocator,
+        &mut vm_guts,
         debug_name,
         &range,
         va,

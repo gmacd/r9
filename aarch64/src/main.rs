@@ -23,6 +23,7 @@ mod uartmini;
 mod uartpl011;
 mod vm;
 mod vmdebug;
+mod vminit;
 
 extern crate alloc;
 
@@ -126,10 +127,10 @@ pub extern "C" fn main9(dtb_va: usize) {
 
     // Map address space accurately using rust VM code to manage page tables
     unsafe {
-        vm::init_kernel_page_tables(&dt, dtb_physrange);
+        vminit::init_kernel_page_tables(&dt, dtb_physrange);
         vm::switch(vm::kernel_pagetable(), RootPageTableType::Kernel);
 
-        vm::init_user_page_tables();
+        vminit::init_user_page_tables();
         vm::switch(vm::user_pagetable(), RootPageTableType::User);
     }
 
