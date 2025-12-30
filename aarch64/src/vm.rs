@@ -54,9 +54,7 @@ pub struct PhysPage4K([u8; PAGE_SIZE_4K]);
 
 impl PhysPage4K {
     pub fn clear(&mut self) {
-        unsafe {
-            core::intrinsics::volatile_set_memory(&mut self.0, 0u8, 1);
-        }
+        unsafe { core::intrinsics::volatile_set_memory(&mut self.0, 0u8, 1) };
     }
 }
 
@@ -186,7 +184,7 @@ impl Entry {
             .with_valid(true)
     }
 
-    const fn with_phys_addr(self, pa: PhysAddr) -> Self {
+    pub const fn with_phys_addr(self, pa: PhysAddr) -> Self {
         Entry(self.0).with_addr(pa.addr() >> 12)
     }
 
@@ -466,9 +464,9 @@ impl RootPageTable {
         if !range.start().is_multiple_of(page_size.size() as u64)
             || !range.end().is_multiple_of(page_size.size() as u64)
         {
-            println!(
-                "error:vm:map_phys_range:range not on page boundary. debug_name:{debug_name} range:{range} page_size:{page_size:?}",
-            );
+            // println!(
+            //     "error:vm:map_phys_range:range not on page boundary. debug_name:{debug_name} range:{range} page_size:{page_size:?}",
+            // );
             return Err(PageTableError::PhysRangeIsNotOnPageBoundary);
         }
 
@@ -563,7 +561,7 @@ fn ttbr1_el1() -> PhysAddr {
 }
 
 // TODO this should just call invalidate_all_tlb_entries afterwards?
-#[allow(unused_variables)]
+#[allow(unused)]
 pub unsafe fn switch(page_table: &RootPageTable, pgtype: RootPageTableType) {
     #[cfg(not(test))]
     unsafe {
@@ -636,9 +634,7 @@ pub struct VmGuts {}
 
 impl VmTrait for VmGuts {
     fn write_entry(&self, dest_entry: &mut Entry, entry: Entry) {
-        unsafe {
-            write_volatile(dest_entry, entry);
-        }
+        unsafe { write_volatile(dest_entry, entry) };
     }
 
     fn replace_recursive_entry(&mut self, pgtype: RootPageTableType, entry: Entry) -> Entry {

@@ -1,11 +1,9 @@
-// Functions to be called in early bootup phase, typically before the MMU has been enabled.
-// This shouldn't normally be used for anything other than debugging at very early init.
+#![allow(unused_variables, dead_code)]
 
+/// Functions to be called in early bootup phase, typically before the MMU has been enabled.
+/// This shouldn't normally be used for anything other than debugging at very early init.
 use core::ops::{BitAndAssign, BitOrAssign};
 use core::ptr::{read_volatile, write_volatile};
-
-use port::fdt::DeviceTree;
-use port::mem::{PhysAddr, PhysRange};
 
 const MMIO_BASE: u32 = 0xfe000000;
 const AUX: u32 = MMIO_BASE + 0x00215000;
@@ -23,13 +21,6 @@ const AUX_MU_BAUD: u32 = AUX_MU + 0x28;
 const GPIO: u32 = MMIO_BASE + 0x00200000;
 const GPFSEL1: u32 = GPIO + 0x04;
 const GPIO_PUP_PDN_CNTRL_REG0: u32 = GPIO + 0xe4;
-
-#[unsafe(no_mangle)]
-pub extern "C" fn init_vm(dtb_pa: u64) {
-    // Parse the DTB before we set up memory so we can correctly map it
-    let dt = unsafe { DeviceTree::from_usize(dtb_pa as usize).unwrap() };
-    let dtb_physrange = PhysRange::with_pa_len(PhysAddr::new(dtb_pa), dt.size());
-}
 
 // Set up a very early uart - the miniuart.  The full driver is in
 // uartmini.rs.  This code is just enough to help debug the early stage.
@@ -95,9 +86,21 @@ pub extern "C" fn init_early_uart_putc(b: u8) {
     }
 }
 
-pub fn init_early_uart_putstr(s: &str) {
+pub fn putstr(s: &str) {
     for b in s.bytes() {
         init_early_uart_putc(b);
+    }
+}
+
+pub fn putu64h(v: u64) {
+    putstr("0x");
+    for i in 0..16 {
+        let a = ((v >> ((15 - i) * 4)) & 0xf) as u8;
+        if a < 10 {
+            init_early_uart_putc(('0' as u8 + a) as u8);
+        } else {
+            init_early_uart_putc(('a' as u8 + a - 10) as u8);
+        }
     }
 }
 

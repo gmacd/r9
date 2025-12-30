@@ -12,10 +12,10 @@ mod devcons;
 mod deviceutil;
 mod io;
 mod kmem;
-mod l;
 mod mailbox;
 mod pagealloc;
 mod param;
+mod pre_mmu;
 mod registers;
 mod swtch;
 mod trap;
@@ -23,7 +23,6 @@ mod uartmini;
 mod uartpl011;
 mod vm;
 mod vmdebug;
-mod vminit;
 
 extern crate alloc;
 
@@ -31,9 +30,9 @@ use alloc::boxed::Box;
 use core::ptr::null_mut;
 use kmem::{boottext_range, bss_range, data_range, rodata_range, text_range, total_kernel_range};
 use param::KZERO;
+use port::fdt::DeviceTree;
 use port::mem::{PhysRange, VirtRange};
 use port::println;
-use port::{fdt::DeviceTree, mem::PhysAddr};
 use vm::{Entry, RootPageTableType, VaMapping};
 
 #[cfg(not(test))]
@@ -109,7 +108,7 @@ pub extern "C" fn main9(dtb_va: usize) {
 
     // Parse the DTB before we set up memory so we can correctly map it
     let dt = unsafe { DeviceTree::from_usize(dtb_va).unwrap() };
-    let dtb_physrange = PhysRange::with_pa_len(PhysAddr::new((dtb_va - KZERO) as u64), dt.size());
+    //let dtb_physrange = PhysRange::with_pa_len(PhysAddr::new((dtb_va - KZERO) as u64), dt.size());
 
     // Try to set up the miniuart so we can log as early as possible.
     devcons::init(&dt, true);
@@ -126,13 +125,13 @@ pub extern "C" fn main9(dtb_va: usize) {
     pagealloc::init_page_allocator();
 
     // Map address space accurately using rust VM code to manage page tables
-    unsafe {
-        vminit::init_kernel_page_tables(&dt, dtb_physrange);
-        vm::switch(vm::kernel_pagetable(), RootPageTableType::Kernel);
+    // unsafe {
+    //     vminit::init_kernel_page_tables(&dt, dtb_physrange);
+    //     vm::switch(vm::kernel_pagetable(), RootPageTableType::Kernel);
 
-        vminit::init_user_page_tables();
-        vm::switch(vm::user_pagetable(), RootPageTableType::User);
-    }
+    //     vminit::init_user_page_tables();
+    //     vm::switch(vm::user_pagetable(), RootPageTableType::User);
+    // }
 
     // From this point we can use the global allocator
 
