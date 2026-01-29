@@ -3,6 +3,7 @@
  */
 
 ENTRY(start)
+KZERO = 0xffff800000000000;
 
 SECTIONS {
 	/* Entrypoint for Raspberry Pi will be at 0x80000 */
@@ -10,64 +11,64 @@ SECTIONS {
 
 
 	/* Group boottext and text */
-	PROVIDE(boottext = .);
-	.text.boot : ALIGN(4096) {
+	.text.boot : AT (ADDR(.text.boot) - KZERO) {
 		*(.boottext .bootdata)
+		. = ALIGN(4096);
 	}
-	. = ALIGN(4096);
-	PROVIDE(eboottext = .);
+	PROVIDE(boottext_pa = LOADADDR(.text.boot));
+	PROVIDE(eboottext_pa = LOADADDR(.text.boot) + SIZEOF(.text.boot));
 
-	PROVIDE(text = .);
-	.text : ALIGN(4096) {
+
+	. = ALIGN(4096);
+	.text : AT (ADDR(.text) - KZERO) {
 		*(.text* .stub .gnu.linkonce.t.*)
+		. = ALIGN(2097152);
 	}
-	. = ALIGN(2097152);
-	PROVIDE(etext = .);
+	PROVIDE(text_pa = LOADADDR(.text));
+	PROVIDE(etext_pa = LOADADDR(.text) + SIZEOF(.text));
 
 
 	/* RO data is in a separate page to other data */
-	PROVIDE(rodata = .);
+	. = ALIGN(2097152);
 	.rodata : ALIGN(2097152) {
 		*(.rodata* .gnu.linkonce.r.*)
+		. = ALIGN(2097152);
 	}
-	. = ALIGN(2097152);
-	PROVIDE(erodata = .);
+	PROVIDE(rodata_pa = LOADADDR(.rodata));
+	PROVIDE(erodata_pa = LOADADDR(.rodata) + SIZEOF(.rodata));
 
 
 	/* Group data and bss */
-	PROVIDE(data = .);
-	.data : ALIGN(4096) {
+	.data : ALIGN(2097152) {
 		*(.data*)
-	}
-	.got : ALIGN(4096) {
 		*(.got)
-	}
-	.got.plt : ALIGN(4096) {
 		*(.got.plt)
+		. = ALIGN(4096);
 	}
-	. = ALIGN(4096);
-	PROVIDE(edata = .);
+	PROVIDE(data_pa = LOADADDR(.data));
+	PROVIDE(edata_pa = LOADADDR(.data) + SIZEOF(.data));
 
-	PROVIDE(bss = .);
+
 	.bss : ALIGN(4096) {
 		*(.bss*)
 		*(COMMON)
+		. = ALIGN(4096);
 	}
-	. = ALIGN(2097152);
-	PROVIDE(ebss = .);
-
 
 	/* Reserve section for early pagetables. */
-	. = ALIGN(4096);
-	earlyvm_pagetables = .;
-	. += 32 * 4096;
-	eearlyvm_pagetables = .;
-	/* TODO Remove after new vm work */
-	early_pagetables = .;
-	. += 32 * 4096;
-	eearly_pagetables = .;
+	.earlyvm_pagetables : ALIGN(4096) {
+		. += 32 * 4096;
+	}
+	PROVIDE(earlyvm_pagetables_pa = LOADADDR(.earlyvm_pagetables));
+	PROVIDE(eearlyvm_pagetables_pa = LOADADDR(.earlyvm_pagetables) + SIZEOF(.earlyvm_pagetables));
 
-	PROVIDE(end = .);
+
+/* TODO Should this be here???  Better to put into the bss section later */
+	.end : ALIGN(2097152) {}
+
+	PROVIDE(bss_pa = LOADADDR(.bss));
+	PROVIDE(ebss_pa = LOADADDR(.end));
+
 
 	/DISCARD/ : {
 		*(.eh_frame .note.GNU-stack)

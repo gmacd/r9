@@ -98,10 +98,10 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
     /// Free unused pages in mem that aren't covered by the memory map.  Assumes
     /// that custom_map is sorted and that available_mem can be used to set the
     /// upper bound of the allocator.
-    pub fn free_unused_ranges<'a>(
+    pub fn free_unused_ranges(
         &mut self,
-        available_mem: &PhysRange,
-        used_ranges: impl Iterator<Item = &'a PhysRange>,
+        available_mem: PhysRange,
+        used_ranges: impl Iterator<Item = PhysRange>,
     ) -> Result<(), PageAllocError> {
         let mut next_start = available_mem.start();
         for range in used_ranges {

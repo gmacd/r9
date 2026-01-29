@@ -7,14 +7,15 @@
 ///    setting up the initial page tables.
 /// 2. `free_unused_ranges` to mark available ranges as the inverse of the
 ///    physical memory map within the bounds of the available memory.
-use crate::kmem;
-use crate::pagealloc;
 use crate::vm::Entry;
+use crate::vm::PhysPageAllocator;
 use crate::vm::RootPageTable;
 use crate::vm::RootPageTableType;
 use crate::vm::VaMapping;
 use crate::vm::VirtPage4K;
+use crate::vm::VmTraitImpl;
 use port::bitmapalloc::BitmapPageAlloc;
+use port::fdt::DeviceTree;
 use port::mem::PhysAddr;
 use port::mem::PhysRange;
 use port::pagealloc::PageAllocError;
@@ -36,37 +37,26 @@ static PAGE_ALLOC: Lock<BitmapPageAlloc<32, PAGE_SIZE_4K>> = Lock::new(
 /// add some pages (mark free) to allow us to set up the page tables and build
 /// a memory map.  Once the memory map has been build, we can mark all the unused
 /// space as available.  This allows us to use only one page allocator throughout.
-pub fn init_page_allocator() {
-    let node = LockNode::new();
-    let mut lock = PAGE_ALLOC.lock(&node);
-    let page_alloc = &mut *lock;
-
-    let early_pages_range = kmem::early_pages_range();
-    if let Err(err) = page_alloc.mark_free(&early_pages_range) {
-        panic!(
-            "error:pagealloc:init_page_allocator:couldn't mark early pages free: range: {} err: {:?}",
-            early_pages_range, err
-        );
-    }
-}
-
-/// Free unused pages in mem that aren't covered by the memory map.  Assumes
-/// that custom_map is sorted.
-pub fn free_unused_ranges<'a>(
-    available_mem: &PhysRange,
-    used_ranges: impl Iterator<Item = &'a PhysRange>,
+pub fn init_page_allocator<'a>(
+    dt: &DeviceTree,
+    used_ranges: impl Iterator<Item = PhysRange>,
 ) -> Result<(), PageAllocError> {
+    // Free unused pages in mem that aren't covered by the memory map.  Assumes
+    // that custom_map is sorted.
+    let Some(available_mem) = dt
+        .find_device_type("memory")
+        .flat_map(|memory| dt.property_translated_reg_iter(memory).flat_map(|r| r.regblock()))
+        .map(|memory| PhysRange::from(&memory))
+        .next()
+    else {
+        panic!("error:pagealloc:free_unused_ranges: can't get memory from dtb\n");
+    };
+
     let node = LockNode::new();
     let mut lock = PAGE_ALLOC.lock(&node);
     let page_alloc = &mut *lock;
 
-    page_alloc.free_unused_ranges(available_mem, used_ranges)?;
-
-    // Mark all the early pages as used.  The early pages are all mapped, but we want to
-    // assume that past this point all pages are unmapped.  The mapping can then be always
-    // done after allocating a page.  The downside is that we lose access to the unallocated
-    // early pages.
-    page_alloc.mark_allocated(&kmem::early_pages_range())
+    page_alloc.free_unused_ranges(available_mem, used_ranges)
 }
 
 /// Try to allocate a physical page.  Note that this is NOT mapped.
@@ -97,8 +87,13 @@ pub fn allocate_virtpage(
 ) -> Result<&'static mut VirtPage4K, PageAllocError> {
     let page_pa = allocate_physpage()?;
     let range = PhysRange::with_pa_len(page_pa, PAGE_SIZE_4K);
+
+    let mut physpage_allocator = PhysPageAllocator {};
+    let mut vmtrait_impl = VmTraitImpl {};
+
     if let Ok(page_va) = page_table.map_phys_range(
-        pagealloc::allocate_physpage,
+        &mut physpage_allocator,
+        &mut vmtrait_impl,
         debug_name,
         &range,
         va,

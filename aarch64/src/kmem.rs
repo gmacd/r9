@@ -3,94 +3,79 @@ use port::mem::{PhysAddr, PhysRange};
 
 // These map to definitions in kernel.ld
 unsafe extern "C" {
-    static eboottext: [u64; 0];
-    static text: [u64; 0];
-    static etext: [u64; 0];
-    static rodata: [u64; 0];
-    static erodata: [u64; 0];
-    static data: [u64; 0];
-    static edata: [u64; 0];
-    static bss: [u64; 0];
-    static ebss: [u64; 0];
-    static end: [u64; 0];
-    static early_pagetables: [u64; 0];
-    static eearly_pagetables: [u64; 0];
+    static eboottext_pa: [u64; 0];
+    static text_pa: [u64; 0];
+    static etext_pa: [u64; 0];
+    static rodata_pa: [u64; 0];
+    static erodata_pa: [u64; 0];
+    static data_pa: [u64; 0];
+    static edata_pa: [u64; 0];
+    static bss_pa: [u64; 0];
+    static ebss_pa: [u64; 0];
 }
 
-fn base_addr() -> usize {
-    KZERO
+fn base_physaddr() -> PhysAddr {
+    PhysAddr::new(0)
 }
 
-fn eboottext_addr() -> usize {
-    unsafe { eboottext.as_ptr().addr() }
+fn eboottext_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(eboottext_pa.as_ptr().addr() as u64) }
 }
 
-fn text_addr() -> usize {
-    unsafe { text.as_ptr().addr() }
+fn text_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(text_pa.as_ptr().addr() as u64) }
 }
 
-fn etext_addr() -> usize {
-    unsafe { etext.as_ptr().addr() }
+fn etext_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(etext_pa.as_ptr().addr() as u64) }
 }
 
-fn rodata_addr() -> usize {
-    unsafe { rodata.as_ptr().addr() }
+fn rodata_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(rodata_pa.as_ptr().addr() as u64) }
 }
 
-fn erodata_addr() -> usize {
-    unsafe { erodata.as_ptr().addr() }
+fn erodata_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(erodata_pa.as_ptr().addr() as u64) }
 }
 
-fn data_addr() -> usize {
-    unsafe { data.as_ptr().addr() }
+fn data_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(data_pa.as_ptr().addr() as u64) }
 }
 
-fn edata_addr() -> usize {
-    unsafe { edata.as_ptr().addr() }
+fn edata_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(edata_pa.as_ptr().addr() as u64) }
 }
 
-fn bss_addr() -> usize {
-    unsafe { bss.as_ptr().addr() }
+fn bss_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(bss_pa.as_ptr().addr() as u64) }
 }
 
-fn ebss_addr() -> usize {
-    unsafe { ebss.as_ptr().addr() }
+fn ebss_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(ebss_pa.as_ptr().addr() as u64) }
 }
 
-fn end_addr() -> usize {
-    unsafe { end.as_ptr().addr() }
+pub fn boottext_physrange() -> PhysRange {
+    PhysRange::new(base_physaddr(), eboottext_physaddr())
 }
 
-fn early_pagetables_addr() -> usize {
-    unsafe { early_pagetables.as_ptr().addr() }
+pub fn text_physrange() -> PhysRange {
+    PhysRange::new(text_physaddr(), etext_physaddr())
 }
 
-fn eearly_pagetables_addr() -> usize {
-    unsafe { eearly_pagetables.as_ptr().addr() }
+pub fn rodata_physrange() -> PhysRange {
+    PhysRange::new(rodata_physaddr(), erodata_physaddr())
 }
 
-pub fn boottext_range() -> PhysRange {
-    PhysRange(from_virt_to_physaddr(base_addr())..from_virt_to_physaddr(eboottext_addr()))
+pub fn data_physrange() -> PhysRange {
+    PhysRange::new(data_physaddr(), edata_physaddr())
 }
 
-pub fn text_range() -> PhysRange {
-    PhysRange(from_virt_to_physaddr(text_addr())..from_virt_to_physaddr(etext_addr()))
+pub fn bss_physrange() -> PhysRange {
+    PhysRange::new(bss_physaddr(), ebss_physaddr())
 }
 
-pub fn rodata_range() -> PhysRange {
-    PhysRange(from_virt_to_physaddr(rodata_addr())..from_virt_to_physaddr(erodata_addr()))
-}
-
-pub fn data_range() -> PhysRange {
-    PhysRange(from_virt_to_physaddr(data_addr())..from_virt_to_physaddr(edata_addr()))
-}
-
-pub fn bss_range() -> PhysRange {
-    PhysRange(from_virt_to_physaddr(bss_addr())..from_virt_to_physaddr(ebss_addr()))
-}
-
-pub fn total_kernel_range() -> PhysRange {
-    PhysRange(from_virt_to_physaddr(base_addr())..from_virt_to_physaddr(end_addr()))
+pub fn total_kernel_physrange() -> PhysRange {
+    PhysRange::new(base_physaddr(), ebss_physaddr())
 }
 
 /// Transform the physical address to a virtual address, under the assumption that
@@ -111,11 +96,4 @@ fn from_virt_to_physaddr(va: usize) -> PhysAddr {
 /// that the code is mapped offset to KZERO, so should be used with extreme care.
 pub fn from_ptr_to_physaddr_offset_from_kzero<T>(a: *const T) -> PhysAddr {
     from_virt_to_physaddr(a.addr())
-}
-
-pub fn early_pages_range() -> PhysRange {
-    PhysRange::new(
-        from_virt_to_physaddr(early_pagetables_addr()),
-        from_virt_to_physaddr(eearly_pagetables_addr()),
-    )
 }

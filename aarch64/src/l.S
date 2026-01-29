@@ -28,7 +28,6 @@ CPACR_EL1_FPEN			= (1<<21) | (1<<20)	// Don't trap FPU instr at EL1,0
 SCTLR_EL1_I			= (1 << 12)		// Instruction access cacheability
 SCTLR_EL1_C			= (1 << 2)		// Data cacheability
 SCTLR_EL1_M			= (1 << 0)		// Enable MMU
-SCTLR_EL1			= (SCTLR_EL1_I|SCTLR_EL1_C|SCTLR_EL1_M)
 
 // This defines the kernel's virtual address location.
 // This value splits a 48 bit address space exactly in half, with the half
@@ -107,11 +106,15 @@ el1:	// In EL1
 	add	x0, x0, #STACKSZ
 	mov	sp, x0
 
-	// Clear BSS using physical addresses
-	ldr	x0, =bss		// Start address
-	sub	x0, x0, x2
-	ldr	x1, =end		// End of bss
-	sub	x1, x1, x2
+	// Clear BSS
+	ldr	x0, =bss_pa
+	ldr	x1, =ebss_pa
+1:	str	xzr, [x0], #8
+	cmp	x0, x1
+	b.ne	1b
+	// Clear early pagetables
+	ldr	x0, =earlyvm_pagetables_pa
+	ldr	x1, =eearlyvm_pagetables_pa
 1:	str	xzr, [x0], #8
 	cmp	x0, x1
 	b.ne	1b
@@ -125,8 +128,10 @@ el1:	// In EL1
 	bl	init_vm
 
 	// Force changes to be be seen before MMU enabled, then enable MMU
-	isb
-	ldr	x0, =(SCTLR_EL1)
+	dsb sy
+	mrs	x0, sctlr_el1
+	ldr	x1, =(SCTLR_EL1_I|SCTLR_EL1_C|SCTLR_EL1_M)
+	orr	x0, x0, x1
 	msr	sctlr_el1, x0		// Enable MMU!
 
 	// Force changes to be be seen by next instruction.

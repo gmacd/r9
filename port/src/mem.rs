@@ -10,6 +10,7 @@ pub const PAGE_SIZE_4K: usize = 4 << 10;
 pub const PAGE_SIZE_2M: usize = 2 << 20;
 pub const PAGE_SIZE_1G: usize = 1 << 30;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct VirtRange(pub Range<usize>);
 
 impl VirtRange {
@@ -117,6 +118,7 @@ impl fmt::Debug for PhysAddr {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct PhysRange(pub Range<PhysAddr>);
 
 impl PhysRange {

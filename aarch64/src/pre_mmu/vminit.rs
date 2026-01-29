@@ -4,30 +4,101 @@ use aarch64_cpu::{
 };
 use port::{
     fdt::DeviceTree,
-    mem::{PhysAddr, PhysRange},
+    mem::{PhysAddr, PhysRange, VirtRange},
     pagealloc::PageAllocError,
 };
 
 use crate::{
-    pre_mmu::util::putstr,
+    param::KZERO,
+    pre_mmu::util::{putstr, putu64h},
     vm::{
-        AccessPermission, Entry, Mair, PageAllocator, PhysPage4K, RootPageTable, Shareable, Table,
+        AccessPermission, Entry, Level, Mair, PageAllocator, PageSize, PageTableError, PhysPage4K,
+        RootPageTable, Shareable, Table, VaMapping, va_index,
     },
 };
 
 // These map to definitions in kernel.ld.
 // In pre-MMU state, these will all map to physical addresses on aarch64.
 unsafe extern "C" {
-    static earlyvm_pagetables: [u64; 0];
-    static eearlyvm_pagetables: [u64; 0];
+    static eboottext_pa: [u64; 0];
+    static text_pa: [u64; 0];
+    static etext_pa: [u64; 0];
+    static rodata_pa: [u64; 0];
+    static erodata_pa: [u64; 0];
+    static data_pa: [u64; 0];
+    static edata_pa: [u64; 0];
+    static bss_pa: [u64; 0];
+    static ebss_pa: [u64; 0];
+    static earlyvm_pagetables_pa: [u64; 0];
+    static eearlyvm_pagetables_pa: [u64; 0];
+}
+
+fn base_physaddr() -> PhysAddr {
+    PhysAddr::new(0)
+}
+
+fn eboottext_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(eboottext_pa.as_ptr().addr() as u64) }
+}
+
+fn text_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(text_pa.as_ptr().addr() as u64) }
+}
+
+fn etext_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(etext_pa.as_ptr().addr() as u64) }
+}
+
+fn rodata_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(rodata_pa.as_ptr().addr() as u64) }
+}
+
+fn erodata_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(erodata_pa.as_ptr().addr() as u64) }
+}
+
+fn data_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(data_pa.as_ptr().addr() as u64) }
+}
+
+fn edata_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(edata_pa.as_ptr().addr() as u64) }
+}
+
+fn bss_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(bss_pa.as_ptr().addr() as u64) }
+}
+
+fn ebss_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(ebss_pa.as_ptr().addr() as u64) }
 }
 
 fn earlyvm_pagetables_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(earlyvm_pagetables.as_ptr().addr() as u64) }
+    unsafe { PhysAddr::new(earlyvm_pagetables_pa.as_ptr().addr() as u64) }
 }
 
 fn eearlyvm_pagetables_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(eearlyvm_pagetables.as_ptr().addr() as u64) }
+    unsafe { PhysAddr::new(eearlyvm_pagetables_pa.as_ptr().addr() as u64) }
+}
+
+pub fn boottext_physrange() -> PhysRange {
+    PhysRange::new(base_physaddr(), eboottext_physaddr())
+}
+
+pub fn text_physrange() -> PhysRange {
+    PhysRange::new(text_physaddr(), etext_physaddr())
+}
+
+pub fn rodata_physrange() -> PhysRange {
+    PhysRange::new(rodata_physaddr(), erodata_physaddr())
+}
+
+pub fn data_physrange() -> PhysRange {
+    PhysRange::new(data_physaddr(), edata_physaddr())
+}
+
+pub fn bss_physrange() -> PhysRange {
+    PhysRange::new(bss_physaddr(), ebss_physaddr())
 }
 
 fn earlyvm_pages_physrange() -> PhysRange {
@@ -38,96 +109,79 @@ fn earlyvm_pages_physrange() -> PhysRange {
 pub extern "C" fn init_vm(dtb_pa: u64) {
     // Parse the DTB before we set up memory so we can correctly map it
     let dt = unsafe { DeviceTree::from_usize(dtb_pa as usize).unwrap() };
-    let _dtb_physrange = PhysRange::with_pa_len(PhysAddr::new(dtb_pa), dt.size());
+    let dtb_physrange = PhysRange::with_pa_len(PhysAddr::new(dtb_pa), dt.size());
 
-    putstr("\nvm init: calling init_kernel_page_tables\n");
+    putstr("\nvminit:init_vm: calling init_kernel_page_tables\n");
+
+    // TODO leave the first page unmapped to catch null pointer dereferences in unsafe code
+    let custom_map = {
+        // The DTB range might not end on a page boundary, so round up.
+        let dtb_page_size = PageSize::Page4K;
+        let dtb_physrange = dtb_physrange.round(dtb_page_size.size());
+
+        let text_physrange = boottext_physrange().add(&text_physrange());
+        let ro_data_physrange = rodata_physrange();
+        let data_physrange = data_physrange().add(&bss_physrange());
+
+        let mut map = [
+            ("DTB", dtb_physrange, Entry::ro_kernel_data(), dtb_page_size),
+            ("Kernel Text", text_physrange, Entry::ro_kernel_text(), PageSize::Page2M),
+            ("Kernel RO Data", ro_data_physrange, Entry::ro_kernel_data(), PageSize::Page2M),
+            ("Kernel Data", data_physrange, Entry::rw_kernel_data(), PageSize::Page2M),
+        ];
+        map.sort_by_key(|a| a.1.start());
+        map
+    };
 
     let mut physpage_allocator = EarlyPageAllocator::new();
 
-    // Manually set up page tables in rust instead of asm.  The next step in this
-    // work will be to generate the tables dynamically, but for now we set up only
-    // for raspberry pi.
-    // *** This code is temporary ***
-
-    // Constants for early uart setup
-    const MMIO_BASE_RPI4: u64 = 0xfe000000;
-    const GPIO: u64 = 0x00200000; // Offset from MMIO base
-
-    let (kernelpt2_pa, kernelpt2) = if let Ok(page_pa) = physpage_allocator.alloc_physpage() {
-        (page_pa, unsafe { &mut *(page_pa.0 as *mut Table) })
-    } else {
-        putstr("vm init: failed to alloc kernelpt2\n");
-        panic!();
-    };
-    //.quad	(MMIO_BASE_RPI4)
-    //+ (PT_BLOCK|PT_AF|PT_AP_KERNEL_RW|PT_ISH|PT_UXN|PT_PXN|PT_MAIR_DEVICE)		// [496] (for mmio)
-    kernelpt2.entries[496] = Entry::empty()
-        .with_phys_addr(PhysAddr::new(MMIO_BASE_RPI4))
-        .with_valid(true)
-        .with_page_or_table(false)
+    let (root_page_table_pa, root_page_table) =
+        if let Ok(page_pa) = physpage_allocator.alloc_physpage() {
+            (page_pa, unsafe { &mut *(page_pa.0 as *mut RootPageTable) })
+        } else {
+            putstr("error:vminit:init_vm: failed to alloc root_kernelpt4\n");
+            panic!();
+        };
+    root_page_table.entries[511] = Entry::empty()
+        .with_phys_addr(root_page_table_pa)
         .with_accessed(true)
-        .with_access_permission(AccessPermission::PrivRw)
-        .with_shareable(Shareable::Inner)
-        .with_uxn(true)
-        .with_pxn(true)
-        .with_mair_index(Mair::Device);
-    //.quad	(MMIO_BASE_RPI4 + GPIO)
-    // + (PT_BLOCK|PT_AF|PT_AP_KERNEL_RW|PT_ISH|PT_UXN|PT_PXN|PT_MAIR_DEVICE)	// [497] (for mmio)
-    kernelpt2.entries[497] = Entry::empty()
-        .with_phys_addr(PhysAddr::new(MMIO_BASE_RPI4 + GPIO))
         .with_valid(true)
-        .with_page_or_table(false)
-        .with_accessed(true)
-        .with_access_permission(AccessPermission::PrivRw)
-        .with_shareable(Shareable::Inner)
-        .with_uxn(true)
-        .with_pxn(true)
-        .with_mair_index(Mair::Device);
-    //.quad	(kernelpt2)
-    // + (PT_AF|PT_PAGE)	// [511] (recursive entry)
-    kernelpt2.entries[511] =
-        Entry::empty().with_phys_addr(kernelpt2_pa).with_valid(true).with_page_or_table(true);
+        .with_page_or_table(true);
 
-    let (kernelpt3_pa, kernelpt3) = if let Ok(page_pa) = physpage_allocator.alloc_physpage() {
-        (page_pa, unsafe { &mut *(page_pa.0 as *mut Table) })
-    } else {
-        putstr("vm init: failed to alloc kernelpt3\n");
-        panic!();
-    };
-    //.quad	(0*2*GiB)
-    // + (PT_BLOCK|PT_AF|PT_AP_KERNEL_RW|PT_ISH|PT_UXN|PT_MAIR_NORMAL)	// [0] (for kernel)
-    kernelpt3.entries[0] = Entry::empty()
-        .with_phys_addr(PhysAddr::new(0))
-        .with_valid(true)
-        .with_page_or_table(false)
-        .with_accessed(true)
-        .with_access_permission(AccessPermission::PrivRw)
-        .with_shareable(Shareable::Inner)
-        .with_uxn(true)
-        .with_mair_index(Mair::Normal);
-    //.quad	(kernelpt2)
-    // + (PT_AF|PT_PAGE)	// [3] (for mmio)
-    kernelpt3.entries[3] =
-        Entry::empty().with_phys_addr(kernelpt2_pa).with_valid(true).with_page_or_table(true);
-    //.quad	(kernelpt3)
-    // + (PT_AF|PT_PAGE)	// [511] (recursive entry)
-    kernelpt3.entries[511] =
-        Entry::empty().with_phys_addr(kernelpt3_pa).with_valid(true).with_page_or_table(true);
+    for (name, range, flags, page_size) in custom_map.iter() {
+        putstr(name);
+        putstr(" ");
+        putu64h(range.start().addr());
+        putstr("..");
+        putu64h(range.end().addr());
+        putstr(" -> ");
 
-    let (kernelpt4_pa, kernelpt4) = if let Ok(page_pa) = physpage_allocator.alloc_physpage() {
-        (page_pa, unsafe { &mut *(page_pa.0 as *mut RootPageTable) })
-    } else {
-        putstr("vm init: failed to alloc kernelpt4\n");
-        panic!();
-    };
-    //.quad	(kernelpt3)
-    // + (PT_AF|PT_PAGE)	// [256] (for kernel + mmio)
-    kernelpt4.entries[256] =
-        Entry::empty().with_phys_addr(kernelpt3_pa).with_valid(true).with_page_or_table(true);
-    //.quad	(kernelpt4)
-    // + (PT_AF|PT_PAGE)	// [511] (recursive entry)
-    kernelpt4.entries[511] =
-        Entry::empty().with_phys_addr(kernelpt4_pa).with_valid(true).with_page_or_table(true);
+        let Ok(mapped_virtrange) = map_phys_range(
+            root_page_table,
+            &mut physpage_allocator,
+            name,
+            range,
+            VaMapping::Offset(KZERO),
+            *flags,
+            *page_size,
+        ) else {
+            putstr("error:vminit:init_vm: map_phys_range failed\n");
+            panic!();
+        };
+
+        putu64h(mapped_virtrange.start() as u64);
+        putstr("..");
+        putu64h(mapped_virtrange.end() as u64);
+        putstr("\n");
+    }
+    // puttable(&root_page_table);
+    // let page_table1: &Table =
+    //     unsafe { &*(root_page_table.entries[256].phys_addr().addr() as *const Table) };
+    // puttable(page_table1);
+
+    // let page_table2: &Table =
+    //     unsafe { &*(page_table1.entries[0].phys_addr().addr() as *const Table) };
+    // puttable(page_table2);
 
     // Early page tables for identity mapping the kernel physical addresses.
     // Once we've jumped to the higher half, this will no longer be used.
@@ -135,7 +189,7 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
     let (physicalpt3_pa, physicalpt3) = if let Ok(page_pa) = physpage_allocator.alloc_physpage() {
         (page_pa, unsafe { &mut *(page_pa.0 as *mut Table) })
     } else {
-        putstr("vm init: failed to alloc physicalpt3\n");
+        putstr("error:vminit:init_vm: failed to alloc physicalpt3\n");
         panic!();
     };
     //.quad	(0*2*GiB)
@@ -153,7 +207,7 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
     let (physicalpt4_pa, physicalpt4) = if let Ok(page_pa) = physpage_allocator.alloc_physpage() {
         (page_pa, unsafe { &mut *(page_pa.0 as *mut RootPageTable) })
     } else {
-        putstr("vm init: failed to alloc physicalpt4\n");
+        putstr("error:vminit:init_vm: failed to alloc physicalpt4\n");
         panic!();
     };
     //.quad	(physicalpt3)
@@ -230,9 +284,9 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
     // half immediately after the MMU is enabled.  Once we enter rust-land,
     // we can define a new set of tables.
 
-    putstr("vm init: switching\n");
+    putstr("vminit:init_vm: switching\n");
 
-    TTBR1_EL1.set(kernelpt4_pa.addr());
+    TTBR1_EL1.set(root_page_table_pa.addr());
     TTBR0_EL1.set(physicalpt4_pa.addr());
 
     TCR_EL1.write(
@@ -241,6 +295,7 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
             + TCR_EL1::SH1::Inner
             + TCR_EL1::ORGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable
             + TCR_EL1::IRGN1::WriteBack_ReadAlloc_WriteAlloc_Cacheable
+            // + TCR_EL1::EPD1::SET
             + TCR_EL1::T1SZ.val(16)
             + TCR_EL1::TG0::KiB_4
             + TCR_EL1::SH0::Inner
@@ -264,7 +319,153 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
 
     dsb(barrier::ISH);
 
-    putstr("vm init: complete\n");
+    putstr("vminit:init_vm: complete\n");
+}
+
+/// Map the physical range using the requested page size.
+/// This aligns on page size boundaries, and rounds the requested range so
+/// that both the alignment requirements are met and the requested range are
+/// covered.
+/// TODO Assuming some of these requests are dynamic, but should not fail,
+/// we should fall back to the smaller page sizes if the requested size fails.
+fn map_phys_range<A: PageAllocator>(
+    root_page_table: &mut RootPageTable,
+    page_allocator: &mut A,
+    debug_name: &str,
+    range: &PhysRange,
+    va_mapping: VaMapping,
+    entry: Entry,
+    page_size: PageSize,
+) -> Result<VirtRange, PageTableError> {
+    if !range.start().is_multiple_of(page_size.size() as u64)
+        || !range.end().is_multiple_of(page_size.size() as u64)
+    {
+        putstr("error:vminit:map_phys_range:range not on page boundary: ");
+        putstr(debug_name);
+        putstr("\n");
+        return Err(PageTableError::PhysRangeIsNotOnPageBoundary);
+    }
+
+    let mut startva = None;
+    let mut endva = 0;
+    let mut currva = 0;
+    for pa in range.step_by_rounded(page_size.size()) {
+        if startva.is_none() {
+            currva = va_mapping.map(pa);
+            startva = Some(currva);
+        } else {
+            currva += page_size.size();
+        }
+        endva = currva + page_size.size();
+        if map_to(root_page_table, page_allocator, entry.with_phys_addr(pa), currva, page_size)
+            .is_err()
+        {
+            putstr("error:vminit:map_phys_range:map_to failed: ");
+            putstr(debug_name);
+            putstr("\n");
+        }
+    }
+    startva.map(|startva| VirtRange(startva..endva)).ok_or(PageTableError::PhysRangeIsZero)
+}
+
+/// Ensure there's a mapping from va to entry, creating any intermediate
+/// page tables that don't already exist.  If a mapping already exists,
+/// replace it.
+/// root_page_table should be a direct va - not a recursive va.
+fn map_to<A: PageAllocator>(
+    root_page_table: &mut RootPageTable,
+    page_allocator: &mut A,
+    entry: Entry,
+    va: usize,
+    page_size: PageSize,
+) -> Result<(), PageTableError> {
+    let dest_entry = match page_size {
+        PageSize::Page4K => next_mut(root_page_table, page_allocator, Level::Level0, va)
+            .and_then(|t1| next_mut(t1, page_allocator, Level::Level1, va))
+            .and_then(|t2| next_mut(t2, page_allocator, Level::Level2, va))
+            .and_then(|t3| entry_mut(t3, Level::Level3, va)),
+        PageSize::Page2M => next_mut(root_page_table, page_allocator, Level::Level0, va)
+            .and_then(|t1| next_mut(t1, page_allocator, Level::Level1, va))
+            .and_then(|t2| entry_mut(t2, Level::Level2, va)),
+        PageSize::Page1G => next_mut(root_page_table, page_allocator, Level::Level0, va)
+            .and_then(|t1| entry_mut(t1, Level::Level1, va)),
+    };
+    let dest_entry = match dest_entry {
+        Ok(e) => e,
+        Err(err) => {
+            putstr("error:vminit:map_to:couldn't find page table entry.");
+            return Err(err);
+        }
+    };
+
+    // Entries at level 3 should have the page flag set
+    let entry = if page_size == PageSize::Page4K { entry.with_page_or_table(true) } else { entry };
+    *dest_entry = entry;
+
+    Ok(())
+}
+
+/// Return the next table in the walk.  If it doesn't exist, create it.
+fn next_mut<'a, A: PageAllocator>(
+    table: &mut Table,
+    page_allocator: &mut A,
+    level: Level,
+    va: usize,
+) -> Result<&'a mut Table, PageTableError> {
+    // Try to get a valid page table entry.  If it doesn't exist, create it.
+    let index = va_index(va, level);
+    if index == 511 {
+        putstr("error:vminit:next_mut:can't use the recursive index");
+        return Err(PageTableError::MappingRecursiveIndex);
+    }
+
+    let mut entry = table.entries[index];
+    if !entry.valid() {
+        // Create a new page table and write the entry into the parent table
+        let page_pa = page_allocator.alloc_physpage();
+        let page_pa = match page_pa {
+            Ok(p) => p,
+            Err(err) => {
+                putstr("error:vminit:next_mut:can't allocate physpage");
+                return Err(PageTableError::AllocationFailed(err));
+            }
+        };
+
+        // Clear out the new page
+        let page = unsafe { &mut *(page_pa.addr() as *mut PhysPage4K) };
+        page.clear();
+
+        // Add same entry to parent table and recursive entry of new table
+        entry = Entry::empty()
+            .with_access_permission(AccessPermission::PrivRw)
+            //.with_shareable(Shareable::Inner)
+            .with_accessed(true)
+            .with_mair_index(Mair::Normal)
+            .with_phys_addr(page_pa)
+            .with_valid(true)
+            .with_page_or_table(true);
+
+        table.entries[index] = entry;
+
+        let new_table = unsafe { &mut *(page_pa.addr() as *mut Table) };
+        new_table.entries[511] = entry;
+        return Ok(new_table);
+    } else if !entry.is_table(level) {
+        putstr("error:vminit:next_mut:entry is not a valid table entry");
+        return Err(PageTableError::EntryIsNotTable);
+    } else {
+        // Return the address of the next table as a recursive address
+        let next_table = unsafe { &mut *(entry.phys_addr().addr() as *mut Table) };
+        return Ok(next_table);
+    }
+}
+
+/// Return a mutable entry from the table based on the virtual address and
+/// the level.  (It uses the level to extract the index from the correct
+/// part of the virtual address).
+pub fn entry_mut(table: &mut Table, level: Level, va: usize) -> Result<&mut Entry, PageTableError> {
+    let idx = va_index(va, level);
+    Ok(&mut table.entries[idx])
 }
 
 struct EarlyPageAllocator {
@@ -296,7 +497,7 @@ impl PageAllocator for EarlyPageAllocator {
             unsafe { &mut *(pa.0 as *mut PhysPage4K) }.clear();
             Ok(pa)
         } else {
-            putstr("error:alloc_physpage:Out of space");
+            putstr("error:vminit:alloc_physpage:Out of space");
             Err(PageAllocError::OutOfSpace)
         }
     }
