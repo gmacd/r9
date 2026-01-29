@@ -28,12 +28,17 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use core::ptr::null_mut;
-use kmem::{boottext_range, bss_range, data_range, rodata_range, text_range, total_kernel_range};
 use param::KZERO;
-use port::mem::{PhysRange, VirtRange};
+use port::fdt::DeviceTree;
+use port::mem::{PhysAddr, PhysRange, VirtRange};
 use port::println;
-use port::{fdt::DeviceTree, mem::PhysAddr};
 use vm::{Entry, RootPageTableType, VaMapping};
+
+use crate::kmem::{
+    boottext_physrange, bss_physrange, data_physrange, rodata_physrange, text_physrange,
+    total_kernel_physrange,
+};
+use crate::vm::PageSize;
 
 #[cfg(not(test))]
 core::arch::global_asm!(include_str!("l.S"));
@@ -45,12 +50,12 @@ fn print_memory_range(name: &str, range: &PhysRange) {
 
 fn print_binary_sections() {
     println!("Binary sections:");
-    print_memory_range("boottext:\t", &boottext_range());
-    print_memory_range("text:\t\t", &text_range());
-    print_memory_range("rodata:\t", &rodata_range());
-    print_memory_range("data:\t\t", &data_range());
-    print_memory_range("bss:\t\t", &bss_range());
-    print_memory_range("total:\t", &total_kernel_range());
+    print_memory_range("boottext:\t", &boottext_physrange());
+    print_memory_range("text:\t\t", &text_physrange());
+    print_memory_range("rodata:\t", &rodata_physrange());
+    print_memory_range("data:\t\t", &data_physrange());
+    print_memory_range("bss:\t\t", &bss_physrange());
+    print_memory_range("total:\t", &total_kernel_physrange());
 }
 
 fn print_memory_info() {
@@ -110,8 +115,20 @@ pub extern "C" fn main9(dtb_va: usize) {
     let dt = unsafe { DeviceTree::from_usize(dtb_va).unwrap() };
     let dtb_physrange = PhysRange::with_pa_len(PhysAddr::new((dtb_va - KZERO) as u64), dt.size());
 
-    // Try to set up the miniuart so we can log as early as possible.
-    devcons::init(&dt, true);
+    // Set up page allocator
+    let mut physranges = [
+        dtb_physrange.round(PageSize::Page4K.size()),
+        boottext_physrange().add(&text_physrange()),
+        rodata_physrange(),
+        data_physrange().add(&bss_physrange()),
+    ];
+    physranges.sort_by_key(|a| a.start());
+    if let Err(err) = pagealloc::init_page_allocator(&dt, physranges.into_iter()) {
+        panic!("error:Couldn't mark unused pages as free: err: {:?}", err);
+    }
+
+    devcons::init(&dt);
+    mailbox::init(&dt);
 
     println!();
     println!("r9 from the Internet");
@@ -121,19 +138,6 @@ pub extern "C" fn main9(dtb_va: usize) {
     print_stacks();
 
     print_binary_sections();
-
-    pagealloc::init_page_allocator();
-
-    // Map address space accurately using rust VM code to manage page tables
-    unsafe {
-        vm::init_kernel_page_tables(&dt, dtb_physrange);
-        vm::switch(vm::kernel_pagetable(), RootPageTableType::Kernel);
-    }
-
-    // From this point we can use the global allocator
-
-    devcons::init(&dt, false);
-    mailbox::init(&dt);
 
     print_board_info();
     print_memory_info();

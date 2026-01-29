@@ -202,7 +202,7 @@ mod tests {
         let p = PteIndices::new(RootPageTableType::User, Some(0), Some(10), Some(40), Some(23));
         assert_eq!(va_indices(p.as_va()), (0, 10, 40, 23));
 
-        let va = 0x0000000000001000;
-        assert_eq!(va_indices(va), (0, 0, 0, 1));
+        let va = 0xfffffffffff20000;
+        assert_eq!(va_indices(va), (511, 511, 511, 288));
     }
 }

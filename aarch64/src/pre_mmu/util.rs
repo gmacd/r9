@@ -6,6 +6,8 @@
 use core::ops::{BitAndAssign, BitOrAssign};
 use core::ptr::{read_volatile, write_volatile};
 
+use crate::vm::Table;
+
 const MMIO_BASE: u32 = 0xfe000000;
 const AUX: u32 = MMIO_BASE + 0x00215000;
 const AUX_ENABLES: u32 = AUX + 0x04;
@@ -102,6 +104,23 @@ pub fn putu64h(v: u64) {
         } else {
             init_early_uart_putc(('a' as u8 + a - 10) as u8);
         }
+    }
+}
+
+pub fn puttable(table: &Table) {
+    putstr("table (");
+    putu64h(table as *const _ as u64);
+    putstr("):\n");
+    for i in 0..512 {
+        let entry = table.entries[i as usize].0;
+        if entry == 0 {
+            continue;
+        }
+        putstr("  [");
+        putu64h(i);
+        putstr("]: ");
+        putu64h(entry);
+        putstr("\n");
     }
 }
 

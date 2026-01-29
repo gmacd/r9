@@ -1,6 +1,5 @@
 // Racy to start.
 
-use crate::param::KZERO;
 use crate::uartmini::MiniUart;
 use core::cell::SyncUnsafeCell;
 use core::mem::MaybeUninit;
@@ -28,13 +27,9 @@ use port::println;
 // - UART2 PL011 (rpi4)
 // - UART3 PL011 (rpi4)
 
-pub fn init(dt: &DeviceTree, is_early_init: bool) {
+pub fn init(dt: &DeviceTree) {
     Console::set_uart(|| {
-        let uart = if is_early_init {
-            MiniUart::new_assuming_mapped_mmio(dt, KZERO)
-        } else {
-            MiniUart::new_with_map_ranges(dt)
-        };
+        let uart = MiniUart::new_with_map_ranges(dt);
 
         // Return a statically initialised MiniUart.  If that couldn't be done for some reason,
         // return None and hope that things work out regardless
