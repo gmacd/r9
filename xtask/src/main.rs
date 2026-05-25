@@ -322,6 +322,7 @@ impl BuildStep {
             cmd.arg("--release");
         }
         cmd.arg("-Z").arg("build-std=core,alloc");
+        cmd.arg("-Z").arg("json-target-spec");
         if self.verbose {
             println!("Executing {cmd:?}");
         }
