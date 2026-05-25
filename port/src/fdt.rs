@@ -480,45 +480,41 @@ impl<'a> DeviceTree<'a> {
             let mut begin_node_ctx: Option<FdtBeginNodeContext> = None;
 
             while i < structs.len() {
-                let token = Self::parse_token(structs, i);
-                if let Some(token) = token {
-                    match token {
-                        FdtToken::BeginNode(ctx) => {
-                            if begin_node_ctx.is_none() {
-                                begin_node_ctx.replace(ctx);
-                                node_depth = depth;
-                                next_token_start = i + ctx.total_len;
-                            }
-                            depth += 1;
-                            i += ctx.total_len;
+                let token = Self::parse_token(structs, i)?;
+                match token {
+                    FdtToken::BeginNode(ctx) => {
+                        if begin_node_ctx.is_none() {
+                            begin_node_ctx.replace(ctx);
+                            node_depth = depth;
+                            next_token_start = i + ctx.total_len;
                         }
-
-                        FdtToken::EndNode(ctx) => {
-                            if begin_node_ctx.is_some() && (depth - 1) == node_depth {
-                                // Reset i for the next node iteration
-                                i = next_token_start;
-                                let new_node = begin_node_ctx.take().map(|begin_ctx| Node {
-                                    start: begin_ctx.start,
-                                    name_start: begin_ctx.name_start,
-                                    next_token_start,
-                                    total_len: (ctx.start + ctx.total_len) - begin_ctx.start,
-                                    depth: node_depth,
-                                });
-                                return new_node;
-                            }
-
-                            depth -= 1;
-                            i += ctx.total_len;
-                        }
-                        FdtToken::Prop(ctx) => {
-                            i += ctx.total_len;
-                        }
-                        FdtToken::Nop(ctx) | FdtToken::End(ctx) => {
-                            i += ctx.total_len;
-                        }
+                        depth += 1;
+                        i += ctx.total_len;
                     }
-                } else {
-                    return None;
+
+                    FdtToken::EndNode(ctx) => {
+                        if begin_node_ctx.is_some() && (depth - 1) == node_depth {
+                            // Reset i for the next node iteration
+                            i = next_token_start;
+                            let new_node = begin_node_ctx.take().map(|begin_ctx| Node {
+                                start: begin_ctx.start,
+                                name_start: begin_ctx.name_start,
+                                next_token_start,
+                                total_len: (ctx.start + ctx.total_len) - begin_ctx.start,
+                                depth: node_depth,
+                            });
+                            return new_node;
+                        }
+
+                        depth -= 1;
+                        i += ctx.total_len;
+                    }
+                    FdtToken::Prop(ctx) => {
+                        i += ctx.total_len;
+                    }
+                    FdtToken::Nop(ctx) | FdtToken::End(ctx) => {
+                        i += ctx.total_len;
+                    }
                 }
             }
             None
