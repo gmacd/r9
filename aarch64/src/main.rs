@@ -2,7 +2,7 @@
 #![allow(internal_features)]
 #![cfg_attr(not(any(test)), no_std)]
 #![cfg_attr(not(test), no_main)]
-#![feature(alloc_error_handler)]
+#![cfg_attr(not(test), feature(alloc_error_handler))]
 #![feature(core_intrinsics)]
 #![feature(sync_unsafe_cell)]
 #![forbid(unsafe_op_in_unsafe_fn)]

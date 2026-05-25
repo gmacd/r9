@@ -12,7 +12,9 @@ pub const GPPUD: usize = 0x94; // GPIO pin pull up/down enable
 pub const GPPUDCLK0: usize = 0x98; // GPIO pin pull up/down enable clock 0
 
 // UART 0 (PL011) registers
+#[allow(unused)]
 pub const UART0_DR: usize = 0x00; // Data register
+#[allow(unused)]
 pub const UART0_FR: usize = 0x18; // Flag register
 pub const UART0_IBRD: usize = 0x24; // Integer baud rate divisor
 pub const UART0_FBRD: usize = 0x28; // Fractional baud rate divisor
