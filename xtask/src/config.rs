@@ -275,7 +275,6 @@ fn apply_rustflags(cmd: &mut Command, rustflags: &[String]) {
         let flat = rustflags.join(" ");
         cmd.arg("--config");
         cmd.arg(format!("build.rustflags='{flat}'"));
-        cmd.arg("-Zjson-target-spec");
     }
 }
 
