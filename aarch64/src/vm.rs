@@ -478,8 +478,8 @@ impl RootPageTable {
         page_size: PageSize,
         pgtype: RootPageTableType,
     ) -> Result<VirtRange, PageTableError> {
-        if !range.start().is_multiple_of(page_size.size() as u64)
-            || !range.end().is_multiple_of(page_size.size() as u64)
+        if !range.start.is_multiple_of(page_size.size() as u64)
+            || !range.end.is_multiple_of(page_size.size() as u64)
         {
             println!(
                 "error:vm:map_phys_range:range not on page boundary. debug_name:{debug_name} range:{range} page_size:{page_size:?}",

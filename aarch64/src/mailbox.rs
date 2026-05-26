@@ -78,7 +78,7 @@ impl Mailbox {
 
         // Write the request address combined with the channel to the write register
         let channel = ChannelId::ArmToVc as u32;
-        let uart_mbox_u32 = self.req_buffer_pa.start().addr() as u32;
+        let uart_mbox_u32 = self.req_buffer_pa.start.addr() as u32;
         let r = (uart_mbox_u32 & !0xF) | channel;
         write_reg(&self.mbox_virtrange, MBOX_WRITE, r);
 

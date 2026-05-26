@@ -129,7 +129,7 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
             ("Kernel RO Data", ro_data_physrange, Entry::ro_kernel_data(), PageSize::Page2M),
             ("Kernel Data", data_physrange, Entry::rw_kernel_data(), PageSize::Page2M),
         ];
-        map.sort_by_key(|a| a.1.start());
+        map.sort_by_key(|a| a.1.start);
         map
     };
 
@@ -151,9 +151,9 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
     for (name, range, flags, page_size) in custom_map.iter() {
         putstr(name);
         putstr(" ");
-        putu64h(range.start().addr());
+        putu64h(range.start.addr());
         putstr("..");
-        putu64h(range.end().addr());
+        putu64h(range.end.addr());
         putstr(" -> ");
 
         let Ok(mapped_virtrange) = map_phys_range(
@@ -337,8 +337,8 @@ fn map_phys_range<A: PageAllocator>(
     entry: Entry,
     page_size: PageSize,
 ) -> Result<VirtRange, PageTableError> {
-    if !range.start().is_multiple_of(page_size.size() as u64)
-        || !range.end().is_multiple_of(page_size.size() as u64)
+    if !range.start.is_multiple_of(page_size.size() as u64)
+        || !range.end.is_multiple_of(page_size.size() as u64)
     {
         putstr("error:vminit:map_phys_range:range not on page boundary: ");
         putstr(debug_name);
@@ -477,7 +477,7 @@ struct EarlyPageAllocator {
 impl EarlyPageAllocator {
     fn new() -> Self {
         let earlyvm_pages_physrange = earlyvm_pages_physrange();
-        let pages_start = earlyvm_pages_physrange.start().addr();
+        let pages_start = earlyvm_pages_physrange.start.addr();
         let pages_pa = pages_start as *mut PhysPage4K;
         let num_pages = earlyvm_pages_physrange.size() / core::mem::size_of::<PhysPage4K>();
         for i in 0..num_pages {

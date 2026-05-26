@@ -123,7 +123,7 @@ pub extern "C" fn main9(dtb_va: usize) {
         rodata_physrange(),
         data_physrange().add(&bss_physrange()),
     ];
-    physranges.sort_by_key(|a| a.start());
+    physranges.sort_by_key(|a| a.start);
     if let Err(err) = pagealloc::init_page_allocator(&dt, physranges.into_iter()) {
         panic!("error:Couldn't mark unused pages as free: err: {:?}", err);
     }
