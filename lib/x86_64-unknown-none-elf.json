@@ -18,5 +18,5 @@
     "pre-link-args": {
         "ld.lld": ["-nostdlib"]
     },
-    "rustc-abi": "x86-softfloat"
+    "rustc-abi": "softfloat"
 }
