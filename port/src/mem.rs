@@ -25,20 +25,20 @@ impl VirtRange {
         Self { start, end: start + len }
     }
 
-    pub fn from_physrange(pr: &PhysRange, offset: usize) -> Self {
+    pub fn from_physrange(pr: PhysRange, offset: usize) -> Self {
         Self { start: pr.start.0 as usize + offset, end: pr.end.0 as usize + offset }
     }
 
-    pub fn offset_addr(&self, offset: usize) -> Option<usize> {
+    pub fn offset_addr(self, offset: usize) -> Option<usize> {
         let addr = self.start + offset;
         if self.contains(addr) { Some(addr) } else { None }
     }
 
-    pub fn size(&self) -> usize {
+    pub fn size(self) -> usize {
         self.end - self.start
     }
 
-    pub fn contains(&self, addr: usize) -> bool {
+    pub fn contains(self, addr: usize) -> bool {
         addr >= self.start && addr < self.end
     }
 }
@@ -66,21 +66,21 @@ impl PhysAddr {
         PhysAddr(value)
     }
 
-    pub const fn addr(&self) -> u64 {
+    pub const fn addr(self) -> u64 {
         self.0
     }
 
     /// Round up by a power of 2
-    pub const fn round_up2(&self, step: u64) -> PhysAddr {
+    pub const fn round_up2(self, step: u64) -> PhysAddr {
         PhysAddr(maths::round_up2_u64(self.0, step))
     }
 
     /// Round down by a power of 2
-    pub const fn round_down2(&self, step: u64) -> PhysAddr {
+    pub const fn round_down2(self, step: u64) -> PhysAddr {
         PhysAddr(maths::round_down2_u64(self.0, step))
     }
 
-    pub const fn is_multiple_of(&self, n: u64) -> bool {
+    pub const fn is_multiple_of(self, n: u64) -> bool {
         self.0.is_multiple_of(n)
     }
 }
@@ -155,34 +155,35 @@ impl PhysRange {
     }
 
     #[allow(dead_code)]
-    pub fn offset_addr(&self, offset: u64) -> Option<PhysAddr> {
+    pub fn offset_addr(self, offset: u64) -> Option<PhysAddr> {
         let addr = self.start + offset;
         if self.contains(addr) { Some(addr) } else { None }
     }
 
-    pub fn size(&self) -> usize {
+    pub fn size(self) -> usize {
         (self.end.addr() - self.start.addr()) as usize
     }
 
-    pub fn step_by_rounded(&self, step_size: usize) -> StepBy<Range<PhysAddr>> {
+    pub fn step_by_rounded(self, step_size: usize) -> StepBy<Range<PhysAddr>> {
         let startpa = self.start.round_down2(step_size as u64);
         let endpa = self.end.round_up2(step_size as u64);
         (startpa..endpa).step_by(step_size)
     }
 
-    pub fn add(&self, other: &PhysRange) -> Self {
+    /// Return new PhysRange spanning from the minimum of the two starts to the maximum of the ends
+    pub fn span_with(self, other: PhysRange) -> Self {
         Self { start: min(self.start, other.start), end: max(self.end, other.end) }
     }
 
     /// Round extents so that start and end lie on multiples of step_size
-    pub fn round(&self, step_size: usize) -> Self {
+    pub fn round(self, step_size: usize) -> Self {
         Self {
             start: self.start.round_down2(step_size as u64),
             end: self.end.round_up2(step_size as u64),
         }
     }
 
-    pub fn contains(&self, addr: PhysAddr) -> bool {
+    pub fn contains(self, addr: PhysAddr) -> bool {
         addr >= self.start && addr < self.end
     }
 }
