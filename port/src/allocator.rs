@@ -477,6 +477,7 @@ impl QuickFit {
 }
 
 #[cfg(not(test))]
+#[allow(clippy::large_unopt_stack_frames)]
 pub mod global {
     use super::QuickFit;
     use alloc::alloc::{GlobalAlloc, Layout};

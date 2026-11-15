@@ -109,7 +109,7 @@ fn print_table_at_level(
     pte_indices: PteIndices,
 ) {
     let indent = 2 + level.depth() * 2;
-    for i in 0..512 {
+    for (i, _) in page_table.entries.iter().enumerate() {
         let pte = page_table.entries[i];
         if !pte.valid() {
             continue;
