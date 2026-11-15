@@ -678,7 +678,7 @@ impl TestStep {
             "test".to_string(),
             "--package".to_string(),
             "port".to_string(),
-            "--lib".to_string(),
+            "--tests".to_string(),
         ]);
 
         let rustup_state = RustupState::new();
