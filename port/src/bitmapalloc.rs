@@ -151,14 +151,19 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
 
     /// Deallocate the page corresponding to the given PhysAddr.
     pub fn deallocate(&mut self, pa: PhysAddr) -> Result<(), PageAllocError> {
-        if pa > self.end {
+        if pa >= self.end {
             return Err(PageAllocError::OutOfBounds);
         }
 
-        let (bitmap_idx, byte_idx, bit_idx) = self.physaddr_as_indices(pa);
+        if !pa.is_multiple_of(self.alloc_page_size as u64) {
+            return Err(PageAllocError::MisalignedAddr);
+        }
+
+        let (bitmap_idx, byte_idx, bit_in_byte_idx) = self.physaddr_as_indices(pa);
 
         let bitmap = &mut self.bitmaps[bitmap_idx];
-        if !bitmap.is_set(8 * byte_idx + bit_idx) {
+        let bit_idx = 8 * byte_idx + bit_in_byte_idx;
+        if !bitmap.is_set(bit_idx) {
             return Err(PageAllocError::NotAllocated);
         }
         bitmap.set(bit_idx, false);
@@ -195,19 +200,24 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
         let byte_idx = pa_offset_into_bitmap / bytes_per_bitmap_byte;
 
         // Finally get the bit within the byte
-        let bit_idx =
+        let bit_in_byte_idx =
             (pa_offset_into_bitmap - (byte_idx * bytes_per_bitmap_byte)) / self.alloc_page_size;
 
-        (bitmap_idx, byte_idx, bit_idx)
+        (bitmap_idx, byte_idx, bit_in_byte_idx)
     }
 
     /// Given the bitmap index, byte index within the bitmap, and bit index within the byte,
     /// return the corresponding PhysAddr.
-    fn indices_as_physaddr(&self, bitmap_idx: usize, byte_idx: usize, bit_idx: usize) -> PhysAddr {
+    fn indices_as_physaddr(
+        &self,
+        bitmap_idx: usize,
+        byte_idx: usize,
+        bit_in_byte_idx: usize,
+    ) -> PhysAddr {
         PhysAddr::new(
             ((bitmap_idx * self.bytes_per_bitmap())
                 + (byte_idx * self.bytes_per_bitmap_byte())
-                + (bit_idx * self.alloc_page_size)) as u64,
+                + (bit_in_byte_idx * self.alloc_page_size)) as u64,
         )
     }
 
@@ -222,13 +232,13 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
         }
 
         for pa in range.step_by_rounded(self.alloc_page_size) {
-            let (bitmap_idx, byte_idx, bit_idx) = self.physaddr_as_indices(pa);
+            let (bitmap_idx, byte_idx, bit_in_byte_idx) = self.physaddr_as_indices(pa);
             if bitmap_idx >= self.bitmaps.len() {
                 return Err(PageAllocError::OutOfBounds);
             }
 
             let bitmap = &mut self.bitmaps[bitmap_idx];
-            bitmap.set(8 * byte_idx + bit_idx, mark_allocated);
+            bitmap.set(8 * byte_idx + bit_in_byte_idx, mark_allocated);
         }
         Ok(())
     }
@@ -403,8 +413,21 @@ mod tests {
         assert_eq!(alloc.deallocate(PhysAddr::new(4)).unwrap_err(), PageAllocError::NotAllocated);
         assert_eq!(alloc.bytes(), [0xfd, 0xff, 0xff, 0xff]);
 
-        // Allocate once more, expecting the physical address we just deallocated
+        // Allocate again, expecting the physical address we just deallocated
         assert_eq!(alloc.allocate()?, PhysAddr::new(4));
+        assert_eq!(alloc.bytes(), [0xff, 0xff, 0xff, 0xff]);
+
+        // Deallocate a page in the second byte of the first bitmap (bit 9)
+        assert!(alloc.deallocate(PhysAddr::new(36)).is_ok());
+        assert_eq!(alloc.bytes(), [0xff, 0xfd, 0xff, 0xff]);
+        assert_eq!(alloc.allocate()?, PhysAddr::new(36));
+        assert_eq!(alloc.bytes(), [0xff, 0xff, 0xff, 0xff]);
+
+        // end is exclusive, so a page at end isn't memory and can't be freed
+        assert_eq!(alloc.deallocate(PhysAddr::new(128)).unwrap_err(), PageAllocError::OutOfBounds);
+
+        // Check misaligned requests are errors (in this test page size is 4)
+        assert_eq!(alloc.deallocate(PhysAddr::new(6)).unwrap_err(), PageAllocError::MisalignedAddr);
 
         Ok(())
     }
