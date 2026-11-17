@@ -277,12 +277,13 @@ impl QuickFit {
         }
     }
 
-    /// Aligns the prefix to the minimum allocation size.
+    /// Aligns the prefix to the minimum allocation size.  A
+    /// prefix too short to reach that alignment is returned
+    /// empty, as none of it can be freed.
     fn align_prefix(prefix: Block) -> Block {
         let ptr = prefix.as_ptr();
         let len = prefix.len();
-        let offset = ptr.align_offset(MIN_ALLOC_SIZE);
-        assert!(offset <= len);
+        let offset = ptr.align_offset(MIN_ALLOC_SIZE).min(len);
         unsafe { Block::new_from_raw_parts(ptr.wrapping_add(offset), len - offset) }
     }
 
@@ -331,12 +332,11 @@ impl QuickFit {
     /// Must be called with a valid block pointer, layout, and
     /// size.
     pub unsafe fn realloc(&mut self, block: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if block.is_null() {
-            return self.malloc(layout);
-        }
         let new_layout = Layout::from_size_align(new_size, layout.align()).expect("layout");
-        let (size, align) = Self::adjust(new_layout);
-        if size == layout.size() && align == layout.align() {
+        if block.is_null() {
+            return self.malloc(new_layout);
+        }
+        if Self::adjust(new_layout) == Self::adjust(layout) {
             return block;
         }
         let np = self.malloc(new_layout);
@@ -390,19 +390,16 @@ impl QuickFit {
         let mut header = self
             .unlink_allocated_misc(block)
             .or_else(|| {
-                let hblock = self.malloc(Layout::new::<Header>()).cast::<Header>();
-                let hblock = hblock
-                    .is_null()
-                    .then(|| {
-                        let offset = block.align_offset(MIN_ALLOC_SIZE);
-                        let hblock = block.as_ptr().wrapping_add(offset);
-                        let next = hblock.wrapping_add(MIN_ALLOC_SIZE);
-                        block = unsafe { NonNull::new_unchecked(next) };
-                        size -= offset + MIN_ALLOC_SIZE;
-                        align = MIN_ALLOC_SIZE;
-                        hblock.cast()
-                    })
-                    .expect("allocated header block");
+                let mut hblock = self.malloc(Layout::new::<Header>()).cast::<Header>();
+                if hblock.is_null() {
+                    let offset = block.align_offset(MIN_ALLOC_SIZE);
+                    let carved = block.as_ptr().wrapping_add(offset);
+                    let next = carved.wrapping_add(MIN_ALLOC_SIZE);
+                    block = unsafe { NonNull::new_unchecked(next) };
+                    size -= offset + MIN_ALLOC_SIZE;
+                    align = MIN_ALLOC_SIZE;
+                    hblock = carved.cast();
+                }
                 let header = Header::new(block, size, align, None);
                 unsafe {
                     ptr::write(hblock, header);
@@ -529,5 +526,137 @@ pub mod global {
         unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
             self.with_allocator(|quick| unsafe { quick.realloc(ptr, layout, new_size) })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ARENA_SIZE: usize = 64 * 1024;
+
+    /// A page-aligned arena for a test's allocator.  It lives on the
+    /// test's stack, so it must outlive the allocator made from it.
+    #[repr(C, align(4096))]
+    struct Arena([u8; ARENA_SIZE]);
+
+    impl Arena {
+        fn new() -> Arena {
+            Arena([0; ARENA_SIZE])
+        }
+
+        fn block(&mut self) -> Block {
+            unsafe { Block::new_from_raw_parts(self.0.as_mut_ptr(), ARENA_SIZE) }
+        }
+
+        fn quickfit(&mut self) -> QuickFit {
+            QuickFit::new(BumpAlloc::new(self.block()))
+        }
+    }
+
+    fn overlaps(a: *mut u8, alen: usize, b: *mut u8, blen: usize) -> bool {
+        a.addr() < b.addr() + blen && b.addr() < a.addr() + alen
+    }
+
+    #[test]
+    fn try_alloc_returns_expected_prefix_and_block() {
+        let mut arena = Arena::new();
+        let bump = BumpAlloc::new(arena.block());
+        let (prefix1, block1) = bump.try_alloc(8, 8).unwrap();
+        assert_eq!(block1.len(), 8);
+        assert_eq!(block1.as_ptr().align_offset(8), 0);
+        assert_eq!(prefix1.len(), 0);
+
+        // The cursor is now offset, so this allocation needs aligning.
+        let (prefix2, block2) = bump.try_alloc(20000, 64).unwrap();
+        assert_eq!(block2.len(), 20000);
+        assert_eq!(block2.as_ptr().align_offset(64), 0);
+        assert_eq!(prefix2.as_ptr(), block1.as_ptr().wrapping_add(8));
+        assert_eq!(prefix2.len(), 56);
+    }
+
+    #[test]
+    fn a_large_misc_allocation_is_not_aligned_to_its_size() {
+        let mut arena = Arena::new();
+        let mut q = arena.quickfit();
+        let small = q.malloc(Layout::from_size_align(64, 64).unwrap());
+        let large = q.malloc(Layout::from_size_align(MAX_QUICK_SIZE + 1000, 64).unwrap());
+        assert_eq!(large, small.wrapping_add(64));
+    }
+
+    #[test]
+    fn a_prefix_too_short_to_align_is_dropped() {
+        let mut arena = Arena::new();
+        let mut q = arena.quickfit();
+        // Leave the cursor off a MIN_ALLOC_SIZE boundary.
+        let a = q.malloc(Layout::from_size_align(20001, 8).unwrap());
+        assert!(!a.is_null());
+        // A 7-byte prefix; the next boundary is 31 bytes away.
+        let b = q.malloc(Layout::from_size_align(20000, 8).unwrap());
+        assert_eq!(b, a.wrapping_add(20008));
+    }
+
+    #[test]
+    fn a_freed_misc_block_is_reused() {
+        let mut arena = Arena::new();
+        let mut q = arena.quickfit();
+        let layout = Layout::from_size_align(20000, 64).unwrap();
+        let p = q.malloc(layout);
+        assert!(!p.is_null());
+        q.free(p, layout);
+        assert_eq!(q.malloc(layout), p);
+    }
+
+    #[test]
+    fn a_misc_block_freed_with_no_room_for_a_header_holds_its_own() {
+        let mut arena = Arena::new();
+        let mut q = arena.quickfit();
+        // Take the whole arena, so the header can't be allocated.
+        let layout = Layout::from_size_align(ARENA_SIZE, 64).unwrap();
+        let p = q.malloc(layout);
+        assert!(!p.is_null());
+        q.free(p, layout);
+        // The header took the block's first MIN_ALLOC_SIZE bytes.
+        let rest = Layout::from_size_align(ARENA_SIZE - MIN_ALLOC_SIZE, 64).unwrap();
+        assert_eq!(q.malloc(rest), p.wrapping_add(MIN_ALLOC_SIZE));
+    }
+
+    #[test]
+    fn realloc_within_a_quick_block_keeps_the_block() {
+        let mut arena = Arena::new();
+        let mut q = arena.quickfit();
+        // 100 bytes comes from the 128-byte quick list.
+        let layout = Layout::from_size_align(100, 1).unwrap();
+        let p = q.malloc(layout);
+        assert!(!p.is_null());
+        assert_eq!(unsafe { q.realloc(p, layout, 120) }, p);
+    }
+
+    #[test]
+    fn realloc_moves_the_contents_to_a_larger_block() {
+        let mut arena = Arena::new();
+        let mut q = arena.quickfit();
+        let layout = Layout::from_size_align(100, 1).unwrap();
+        let p = q.malloc(layout);
+        for i in 0..100 {
+            unsafe { p.add(i).write(i as u8) };
+        }
+        let np = unsafe { q.realloc(p, layout, 1000) };
+        assert!(!np.is_null());
+        assert_ne!(np, p);
+        for i in 0..100 {
+            assert_eq!(unsafe { np.add(i).read() }, i as u8);
+        }
+    }
+
+    #[test]
+    fn realloc_of_null_allocates_the_new_size() {
+        let mut arena = Arena::new();
+        let mut q = arena.quickfit();
+        let layout = Layout::from_size_align(8, 8).unwrap();
+        let p = unsafe { q.realloc(ptr::null_mut(), layout, 1000) };
+        assert!(!p.is_null());
+        let next = q.malloc(Layout::from_size_align(64, 64).unwrap());
+        assert!(!overlaps(p, 1000, next, 64), "a later allocation overlaps the realloc'd block");
     }
 }
