@@ -83,7 +83,7 @@ impl BumpAlloc {
     /// satisfied, otherwise returns `Some` of a pair of blocks:
     /// the first contains the prefix before the (aligned) block
     /// and the second is the requested block itself.
-    pub fn try_alloc(&self, align: usize, size: usize) -> Option<(Block, Block)> {
+    pub fn try_alloc(&self, size: usize, align: usize) -> Option<(Block, Block)> {
         let base = self.arena.as_ptr();
         let mut first = ptr::null_mut();
         let mut adjust = 0;
