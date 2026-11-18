@@ -10,7 +10,7 @@ use core::fmt;
 
 use crate::{
     mem::{PhysAddr, PhysRange},
-    pagealloc::PageAllocError,
+    pagealloc::PageAllocError::{self, MisalignedAddr},
 };
 
 /// Simple bitmap.  Bear in mind that logically, bit 0 is the rightmost bit,
@@ -44,13 +44,42 @@ impl<const SIZE_BYTES: usize> Bitmap<SIZE_BYTES> {
     }
 }
 
+/// Run of physical pages, guaranteed to be aligned by the creator
+#[derive(Clone, Copy)]
+struct PhysRun {
+    start: PhysAddr,
+    num_pages: usize,
+    page_size: usize,
+}
+
+impl PhysRun {
+    const fn new(start: PhysAddr, end: PhysAddr, page_size: usize) -> Option<PhysRun> {
+        if !start.is_multiple_of(page_size as u64)
+            || !end.is_multiple_of(page_size as u64)
+            || end.0 < start.0
+        {
+            None
+        } else {
+            Some(Self {
+                start,
+                num_pages: (end.0 as usize - start.0 as usize) / page_size,
+                page_size,
+            })
+        }
+    }
+
+    const fn to_range(self) -> PhysRange {
+        PhysRange::with_pa_len(self.start, self.num_pages * self.page_size)
+    }
+}
+
 /// Allocator where each page is represented by a single bit.
 ///   0: free, 1: allocated
 /// `end` is used to indicate the extent of the memory.  Anything beyond this
 /// will be marked as allocated.
 pub struct BitmapPageAlloc<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize> {
     bitmaps: [Bitmap<BITMAP_SIZE_BYTES>; NUM_BITMAPS],
-    alloc_page_size: usize,    // Size of pages represented by single bit
+    page_size: usize,          // Size of pages represented by single bit
     end: PhysAddr,             // Upper bound of physical memory
     next_pa_to_scan: PhysAddr, // PhysAddr from which to start scanning for next allocation
 }
@@ -58,11 +87,11 @@ pub struct BitmapPageAlloc<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: us
 impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
     BitmapPageAlloc<NUM_BITMAPS, BITMAP_SIZE_BYTES>
 {
-    pub const fn new_all_allocated(alloc_page_size: usize) -> Self {
-        let end = PhysAddr::new((NUM_BITMAPS * BITMAP_SIZE_BYTES * 8 * alloc_page_size) as u64);
+    pub const fn new_all_allocated(page_size: usize) -> Self {
+        let end = PhysAddr::new((NUM_BITMAPS * BITMAP_SIZE_BYTES * 8 * page_size) as u64);
         Self {
             bitmaps: [const { Bitmap::<BITMAP_SIZE_BYTES>::new(0xff) }; NUM_BITMAPS],
-            alloc_page_size,
+            page_size,
             end,
             next_pa_to_scan: PhysAddr::new(0),
         }
@@ -70,7 +99,7 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
 
     /// Returns number of physical bytes a single bitmap can cover.
     const fn bytes_per_bitmap_byte(&self) -> usize {
-        8 * self.alloc_page_size
+        8 * self.page_size
     }
 
     /// Returns number of physical bytes a single bitmap can cover.
@@ -83,20 +112,19 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
         NUM_BITMAPS * self.bytes_per_bitmap()
     }
 
-    /// Mark the bits corresponding to the given physical range as allocated,
-    /// regardless of the existing state.
-    pub fn mark_allocated(&mut self, range: PhysRange) -> Result<(), PageAllocError> {
-        self.mark_range(range, true, true)
+    /// Mark every page the run covers as allocated.
+    #[cfg(test)]
+    fn mark_allocated(&mut self, phys_run: PhysRun) -> Result<(), PageAllocError> {
+        self.mark_range(phys_run, true, true)
     }
 
-    /// Mark the bits corresponding to the given physical range as free,
-    /// regardless of the existing state.
-    pub fn mark_free(&mut self, range: PhysRange) -> Result<(), PageAllocError> {
-        self.mark_range(range, false, true)
+    /// Mark the bits corresponding to the given run as free.
+    fn mark_free(&mut self, phys_run: PhysRun) -> Result<(), PageAllocError> {
+        self.mark_range(phys_run, false, true)
     }
 
     /// Free unused pages in mem that aren't covered by the memory map.  Assumes
-    /// that custom_map is sorted and that available_mem can be used to set the
+    /// that used_ranges is sorted and that available_mem can be used to set the
     /// upper bound of the allocator.
     pub fn free_unused_ranges(
         &mut self,
@@ -106,21 +134,30 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
         let mut next_start = available_mem.start;
         for range in used_ranges {
             if next_start < range.start {
-                self.mark_free(PhysRange::new(next_start, range.start))?;
+                self.mark_free(
+                    PhysRun::new(next_start, range.start, self.page_size).ok_or(MisalignedAddr)?,
+                )?;
             }
             if next_start < range.end {
                 next_start = range.end;
             }
         }
         if next_start < available_mem.end {
-            self.mark_free(PhysRange::new(next_start, available_mem.end))?;
+            self.mark_free(
+                PhysRun::new(next_start, available_mem.end, self.page_size)
+                    .ok_or(MisalignedAddr)?,
+            )?;
         }
 
         self.end = available_mem.end;
 
         // Mark everything past the end point as allocated
-        let end_range = PhysRange::new(self.end, PhysAddr::new(self.max_bytes() as u64));
-        self.mark_range(end_range, true, false)?;
+        self.mark_range(
+            PhysRun::new(self.end, PhysAddr::new(self.max_bytes() as u64), self.page_size)
+                .ok_or(MisalignedAddr)?,
+            true,
+            false,
+        )?;
 
         self.next_pa_to_scan = PhysAddr::new(0); // Just set to 0 for simplicity - could be smarter
 
@@ -155,7 +192,7 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
             return Err(PageAllocError::OutOfBounds);
         }
 
-        if !pa.is_multiple_of(self.alloc_page_size as u64) {
+        if !pa.is_multiple_of(self.page_size as u64) {
             return Err(PageAllocError::MisalignedAddr);
         }
 
@@ -179,7 +216,7 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
         // if the end comes in the middle of a byte in the bitmap.
         let mut free_bytes: usize = 0;
         for indices in self.indices() {
-            free_bytes += self.byte(&indices).count_zeros() as usize * self.alloc_page_size;
+            free_bytes += self.byte(&indices).count_zeros() as usize * self.page_size;
         }
         let total = self.end.0 as usize;
         (total - free_bytes, total)
@@ -188,7 +225,7 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
     /// For the given physaddr, returns a tuple of (the bitmap containing pa,
     /// the index of the byte containing the pa, and the index of the bit within that byte).
     fn physaddr_as_indices(&self, pa: PhysAddr) -> (usize, usize, usize) {
-        assert_eq!(pa.addr() % self.alloc_page_size as u64, 0);
+        assert_eq!(pa.addr() % self.page_size as u64, 0);
 
         // Get the index of the bitmap containing the pa
         let bytes_per_bitmap = self.bytes_per_bitmap();
@@ -201,7 +238,7 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
 
         // Finally get the bit within the byte
         let bit_in_byte_idx =
-            (pa_offset_into_bitmap - (byte_idx * bytes_per_bitmap_byte)) / self.alloc_page_size;
+            (pa_offset_into_bitmap - (byte_idx * bytes_per_bitmap_byte)) / self.page_size;
 
         (bitmap_idx, byte_idx, bit_in_byte_idx)
     }
@@ -217,21 +254,22 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
         PhysAddr::new(
             ((bitmap_idx * self.bytes_per_bitmap())
                 + (byte_idx * self.bytes_per_bitmap_byte())
-                + (bit_in_byte_idx * self.alloc_page_size)) as u64,
+                + (bit_in_byte_idx * self.page_size)) as u64,
         )
     }
 
     fn mark_range(
         &mut self,
-        range: PhysRange,
+        phys_run: PhysRun,
         mark_allocated: bool,
         check_end: bool,
     ) -> Result<(), PageAllocError> {
+        let range = phys_run.to_range();
         if check_end && range.end > self.end {
             return Err(PageAllocError::OutOfBounds);
         }
 
-        for pa in range.step_by_rounded(self.alloc_page_size) {
+        for pa in (range.start..range.end).step_by(self.page_size) {
             let (bitmap_idx, byte_idx, bit_in_byte_idx) = self.physaddr_as_indices(pa);
             if bitmap_idx >= self.bitmaps.len() {
                 return Err(PageAllocError::OutOfBounds);
@@ -253,41 +291,20 @@ impl<const NUM_BITMAPS: usize, const BITMAP_SIZE_BYTES: usize>
     /// Iterate over each of the bytes in turn, starting from a particular bitmap
     /// and byte, and looping to iterate across all bytes.  Iterates only over the bytes
     /// covering pages up to `end`.  If `end` is within one of the bytes, that
-    /// byte will be returned.
+    /// byte will be returned.  A start past `end` starts from the first byte.
     fn indices_from(
         &self,
         start_bitmap_idx: usize,
         start_byte_idx: usize,
     ) -> impl Iterator<Item = ByteIndices> + '_ {
-        let mut bitmap_idx = start_bitmap_idx;
-        let mut byte_idx = start_byte_idx;
-        let mut passed_first = false;
-        let mut currpa = self.indices_as_physaddr(bitmap_idx, byte_idx, 0);
-
-        core::iter::from_fn(move || {
-            // Catch when we've iterated to the end of the last bitmap and need to
-            // cycle back to the start
-            if bitmap_idx >= self.bitmaps.len() || currpa >= self.end {
-                bitmap_idx = 0;
-                byte_idx = 0;
-                currpa = PhysAddr::new(0);
-            }
-
-            // Catch when we've iterated over all the bytes
-            if passed_first && bitmap_idx == start_bitmap_idx && byte_idx == start_byte_idx {
-                return None;
-            }
-            passed_first = true;
-
-            // Return the byte and prepare for the next
-            let indices = ByteIndices { bitmap: bitmap_idx, byte: byte_idx };
-            byte_idx += 1;
-            if byte_idx >= BITMAP_SIZE_BYTES {
-                byte_idx = 0;
-                bitmap_idx += 1;
-                currpa.0 += self.alloc_page_size as u64;
-            }
-            Some(indices)
+        let num_bytes = (self.end.addr() as usize)
+            .div_ceil(self.bytes_per_bitmap_byte())
+            .min(NUM_BITMAPS * BITMAP_SIZE_BYTES);
+        let start = start_bitmap_idx * BITMAP_SIZE_BYTES + start_byte_idx;
+        let start = if start < num_bytes { start } else { 0 };
+        (0..num_bytes).map(move |i| {
+            let i = (start + i) % num_bytes;
+            ByteIndices { bitmap: i / BITMAP_SIZE_BYTES, byte: i % BITMAP_SIZE_BYTES }
         })
     }
 
@@ -366,14 +383,21 @@ mod tests {
         // 2 bitmaps, 2 bytes per bitmap, mapped to pages of 4 bytes
         // 32 bits, 128 bytes physical memory
         let mut alloc = BitmapPageAlloc::<2, 2>::new_all_allocated(4);
-        alloc.mark_free(PhysRange::with_end(0, alloc.max_bytes() as u64))?;
+        alloc.mark_free(
+            PhysRun::new(PhysAddr(0), PhysAddr(alloc.max_bytes() as u64), alloc.page_size)
+                .ok_or(MisalignedAddr)?,
+        )?;
 
         // Mark a range as allocated - 10 bits
-        alloc.mark_allocated(PhysRange::with_end(4, 44))?;
+        alloc.mark_allocated(
+            PhysRun::new(PhysAddr(4), PhysAddr(44), alloc.page_size).ok_or(MisalignedAddr)?,
+        )?;
         assert_eq!(alloc.bytes(), [0xfe, 0x07, 0x00, 0x00]);
 
         // Deallocate a range - first 2 bits
-        alloc.mark_free(PhysRange::with_end(0, 8))?;
+        alloc.mark_free(
+            PhysRun::new(PhysAddr(0), PhysAddr(8), alloc.page_size).ok_or(MisalignedAddr)?,
+        )?;
         assert_eq!(alloc.bytes(), [0xfc, 0x07, 0x00, 0x00]);
         Ok(())
     }
@@ -384,11 +408,16 @@ mod tests {
         // 2 bitmaps, 2 bytes per bitmap, mapped to pages of 4 bytes
         // 32 bits, 128 bytes physical memory
         let mut alloc = BitmapPageAlloc::<2, 2>::new_all_allocated(4);
-        alloc.mark_free(PhysRange::with_end(0, alloc.max_bytes() as u64))?;
+        alloc.mark_free(
+            PhysRun::new(PhysAddr(0), PhysAddr(alloc.max_bytes() as u64), alloc.page_size)
+                .ok_or(MisalignedAddr)?,
+        )?;
         assert_eq!(alloc.usage_bytes(), (0, 128));
 
         // Mark a range as allocated - 10 bits
-        alloc.mark_allocated(PhysRange::with_end(4, 44))?;
+        alloc.mark_allocated(
+            PhysRun::new(PhysAddr(4), PhysAddr(44), alloc.page_size).ok_or(MisalignedAddr)?,
+        )?;
         assert_eq!(alloc.usage_bytes(), (40, 128));
         assert_eq!(alloc.bytes(), [0xfe, 0x07, 0x00, 0x00]);
 
@@ -431,6 +460,53 @@ mod tests {
 
         Ok(())
     }
+
+    //     #[test]
+    //     fn freeing_leaves_partly_covered_pages_allocated() -> Result<(), PageAllocError> {
+    //         // 32 pages of 4 bytes, all allocated
+    //         let mut alloc = BitmapPageAlloc::<2, 2>::new_all_allocated(4);
+    //
+    //         // Only the pages at 4..8 and 8..12 lie wholly within 2..14
+    //         alloc.mark_free(PhysRange::with_end(2, 14))?;
+    //         assert_eq!(alloc.bytes(), [0xf9, 0xff, 0xff, 0xff]);
+    //         Ok(())
+    //     }
+    //
+    //     #[test]
+    //     fn unused_ranges_exclude_pages_shared_with_used_ones() -> Result<(), PageAllocError> {
+    //         let mut alloc = BitmapPageAlloc::<2, 2>::new_all_allocated(4);
+    //
+    //         // 10..30 touches the pages at 8..32, so they stay allocated
+    //         let used = [PhysRange::with_end(10, 30)];
+    //         alloc.free_unused_ranges(PhysRange::with_end(0, 128), used.into_iter())?;
+    //         assert_eq!(alloc.bytes(), [0xfc, 0x00, 0x00, 0x00]);
+    //         Ok(())
+    //     }
+    //
+    //     #[test]
+    //     fn iteration_stops_at_end() -> Result<(), PageAllocError> {
+    //         let mut alloc = BitmapPageAlloc::<2, 2>::new_all_allocated(4);
+    //
+    //         // 10 pages, so only the first two bytes cover memory
+    //         alloc.free_unused_ranges(PhysRange::with_end(0, 40), core::iter::empty())?;
+    //         assert_eq!(alloc.bytes(), [0x00, 0xfc]);
+    //         assert_eq!(alloc.bytes_from(0, 1), [0xfc, 0x00]);
+    //         // The second bitmap is past end, so a scan from it starts at the first
+    //         assert_eq!(alloc.bytes_from(1, 0), [0x00, 0xfc]);
+    //         assert_eq!(alloc.usage_bytes(), (0, 40));
+    //
+    //         for _ in 0..10 {
+    //             alloc.allocate()?;
+    //         }
+    //         assert_eq!(alloc.allocate().unwrap_err(), PageAllocError::OutOfSpace);
+    //
+    //         // The scan starts at the last page freed, and wraps to find the first
+    //         alloc.deallocate(PhysAddr::new(0))?;
+    //         alloc.deallocate(PhysAddr::new(36))?;
+    //         assert_eq!(alloc.allocate()?, PhysAddr::new(36));
+    //         assert_eq!(alloc.allocate()?, PhysAddr::new(0));
+    //         Ok(())
+    //     }
 
     #[test]
     fn physaddr_as_indices() {
