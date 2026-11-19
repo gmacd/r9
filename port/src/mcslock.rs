@@ -81,13 +81,19 @@ impl MCSLock {
     }
 }
 
+/// A lock protecting a `T`.  Whichever thread holds the lock uses the
+/// `T`, so a lock can only be shared between threads if `T` can be sent
+/// between them.
 pub struct Lock<T: ?Sized> {
     lock: UnsafeCell<MCSLock>,
     data: UnsafeCell<T>,
 }
 
-unsafe impl<T: ?Sized> Send for Lock<T> {}
-unsafe impl<T: ?Sized> Sync for Lock<T> {}
+// If a Lock is to be moved between threads, its data must implement Send
+unsafe impl<T: ?Sized + Send> Send for Lock<T> {}
+
+// If a Lock is to be shared between threads, its data must implement Send
+unsafe impl<T: ?Sized + Send> Sync for Lock<T> {}
 
 impl<T> Lock<T> {
     pub const fn new(name: &'static str, data: T) -> Lock<T> {

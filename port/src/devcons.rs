@@ -17,7 +17,7 @@ const CTLP: u8 = ctrl(b'P');
 #[allow(dead_code)]
 const CTLU: u8 = ctrl(b'U');
 
-pub trait Uart {
+pub trait Uart: Send {
     fn putb(&self, b: u8);
 }
 
