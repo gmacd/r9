@@ -6,5 +6,10 @@ members = ["aarch64", "x86_64", "port", "riscv64", "xtask"]
 panic = "abort"
 opt-level = 1
 
+# Miri can't run optimizations, so keep the test profile at opt-level 0 to
+# avoid its "opt-level is ignored" warning.
+[profile.test]
+opt-level = 0
+
 [profile.release]
 panic = "abort"
