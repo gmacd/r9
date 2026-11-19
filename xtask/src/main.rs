@@ -674,12 +674,7 @@ impl TestStep {
     fn run(self) -> Result<()> {
         let mut all_cmd_args = Vec::new();
 
-        all_cmd_args.push(vec![
-            "test".to_string(),
-            "--package".to_string(),
-            "port".to_string(),
-            "--tests".to_string(),
-        ]);
+        all_cmd_args.push(vec!["test".to_string(), "--package".to_string(), "port".to_string()]);
 
         let rustup_state = RustupState::new();
 
