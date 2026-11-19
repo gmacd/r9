@@ -171,6 +171,7 @@ fn main() {
             clap::arg!(--release "Build a release version").conflicts_with("debug"),
             clap::arg!(--debug "Build a debug version").conflicts_with("release"),
             clap::arg!(--json "Output messages as json"),
+            clap::arg!(--miri "Run with miri component"),
             clap::arg!(--verbose "Print commands"),
         ]))
         .subcommand(
@@ -661,14 +662,16 @@ impl KasmStep {
 struct TestStep {
     json_output: bool,
     verbose: bool,
+    miri: bool,
 }
 
 impl TestStep {
     fn new(matches: &clap::ArgMatches) -> Self {
         let json_output = matches.get_flag("json");
         let verbose = verbose(matches);
+        let miri = matches.get_flag("miri");
 
-        Self { json_output, verbose }
+        Self { json_output, verbose, miri }
     }
 
     fn run(self) -> Result<()> {
@@ -693,6 +696,10 @@ impl TestStep {
         for cmd_args in all_cmd_args {
             let mut cmd = Command::new(cargo());
             cmd.current_dir(workspace());
+
+            if self.miri {
+                cmd.arg("miri");
+            }
 
             cmd.args(cmd_args);
             if self.json_output {
