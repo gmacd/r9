@@ -1,4 +1,4 @@
-#![feature(alloc_error_handler)]
+#![cfg_attr(not(test), feature(alloc_error_handler))]
 #![feature(sync_unsafe_cell)]
 #![cfg_attr(not(any(test)), no_std)]
 #![cfg_attr(not(test), no_main)]
