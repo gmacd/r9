@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
     process::{self, Command},
     str::FromStr,
+    thread,
 };
 use target_lexicon::Triple;
 
@@ -290,6 +291,7 @@ struct BuildStep {
     arch: Arch,
     config: Configuration,
     profile: Profile,
+    num_jobs: usize,
     verbose: bool,
 }
 
@@ -300,7 +302,9 @@ impl BuildStep {
         let profile = Profile::from(matches);
         let verbose = verbose(matches);
 
-        Self { arch, config, profile, verbose }
+        let num_jobs = thread::available_parallelism().map_or(1, |n| n.get()).min(8);
+
+        Self { arch, config, profile, num_jobs, verbose }
     }
 
     fn run(self) -> Result<()> {
@@ -313,6 +317,7 @@ impl BuildStep {
             &self.arch.target(),
             &self.profile,
             workspace().to_str().unwrap(),
+            self.num_jobs,
         );
 
         cmd.current_dir(workspace());
