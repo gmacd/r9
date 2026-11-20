@@ -5,4 +5,8 @@ targets = [
     "aarch64-unknown-none",
     "riscv64gc-unknown-none-elf",
     "x86_64-unknown-none",
+    # Host-std targets, so each arch crate's tests can be checked on any host.
+    "aarch64-unknown-linux-gnu",
+    "riscv64gc-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
 ]

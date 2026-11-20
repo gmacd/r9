@@ -101,13 +101,23 @@ impl RustupState {
     /// For the given arch, return a compatible toolchain triple that is
     /// installed and can be used by cargo check.  It will prefer the default
     /// toolchain if it's a match, otherwise it will look for the
-    /// <arch-unknown-linux-gnu> toolchain.
-    fn std_supported_target(&self, arch: &str) -> Option<&Triple> {
+    /// <arch-unknown-linux-gnu> toolchain.  It's an error if neither is
+    /// installed, so an arch's tests are never skipped silently.
+    fn std_supported_target(&self, arch: &str) -> Result<&Triple> {
         let arch = Self::target_arch(arch);
-        self.installed_targets.iter().filter(|&t| t.architecture.to_string() == arch).find(|&t| {
-            self.curr_toolchain.ends_with(&t.to_string())
-                || t.to_string() == arch.to_owned() + "-unknown-linux-gnu"
-        })
+        let linux_target = arch.to_owned() + "-unknown-linux-gnu";
+        self.installed_targets
+            .iter()
+            .filter(|&t| t.architecture.to_string() == arch)
+            .find(|&t| {
+                self.curr_toolchain.ends_with(&t.to_string()) || t.to_string() == linux_target
+            })
+            .ok_or_else(|| {
+                format!(
+                    "no std target installed for {arch}: run `rustup target add {linux_target}`"
+                )
+                .into()
+            })
     }
 
     /// Return the arch in a form compatible with the supported targets and toolchains
@@ -682,16 +692,15 @@ impl TestStep {
         let rustup_state = RustupState::new();
 
         let arch = std::env::consts::ARCH;
-        if let Some(target) = rustup_state.std_supported_target(arch) {
-            all_cmd_args.push(vec![
-                "test".to_string(),
-                "--package".to_string(),
-                arch.to_string(),
-                "--bins".to_string(),
-                "--target".to_string(),
-                target.to_string(),
-            ]);
-        }
+        let target = rustup_state.std_supported_target(arch)?;
+        all_cmd_args.push(vec![
+            "test".to_string(),
+            "--package".to_string(),
+            arch.to_string(),
+            "--bins".to_string(),
+            "--target".to_string(),
+            target.to_string(),
+        ]);
 
         for cmd_args in all_cmd_args {
             let mut cmd = Command::new(cargo());
@@ -760,8 +769,8 @@ impl ClippyStep {
 }
 
 /// Run check for all packages for all relevant toolchains.
-/// This assumes that the <arch>-unknown-linux-gnu toolchain has been installed
-/// for any arch we care about.
+/// The <arch>-unknown-linux-gnu targets that this needs are installed by
+/// rust-toolchain.toml.
 struct CheckStep {
     json_output: bool,
     verbose: bool,
@@ -817,9 +826,7 @@ impl CheckStep {
         let mut benches_tests_package_cmd_args = Vec::new();
 
         for arch in ["aarch64", "riscv64", "x86_64"] {
-            let Some(target) = rustup_state.std_supported_target(arch) else {
-                continue;
-            };
+            let target = rustup_state.std_supported_target(arch)?;
 
             benches_tests_package_cmd_args.push(vec![
                 "check".to_string(),
