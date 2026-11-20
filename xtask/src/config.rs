@@ -290,11 +290,16 @@ pub fn apply_to_build_step(
     target: &str,
     profile: &Profile,
     workspace_path: &str,
+    num_jobs: usize,
 ) {
     let mut rustflags: Vec<String> = Vec::new();
     apply_build(cmd, &mut rustflags, config);
     apply_platform_config(cmd, &mut rustflags, config);
     apply_link(&mut rustflags, config, target, profile, workspace_path);
+
+    rustflags.push("-Zunstable-options".into());
+    rustflags.push(format!("--jobs-frontend={num_jobs}"));
+
     apply_rustflags(cmd, &rustflags);
 }
 
