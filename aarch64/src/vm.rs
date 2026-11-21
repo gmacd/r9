@@ -440,25 +440,24 @@ impl RootPageTable {
                 .next_mut(page_allocator, vmtrait_impl, pgtype, Level::Level0, va)
                 .and_then(|t1| t1.entry_mut(Level::Level1, va)),
         };
-        let dest_entry = match dest_entry {
-            Ok(e) => e,
+
+        let result = match dest_entry {
+            Ok(e) => {
+                // Entries at level 3 (where the page size is 4K) should have the page flag set.
+                // Larger page sizes set this to false.
+                let entry = entry.with_page_or_table(page_size == PageSize::Page4K);
+                vmtrait_impl.write_entry(e, entry);
+                Ok(())
+            }
             Err(err) => {
-                println!(
-                    "error:vm:map_to:couldn't find page table entry. va:{:#x} err:{:?}",
-                    va, err
-                );
-                return Err(err);
+                println!("error:vm:map_to:couldn't find page table entry. va:{va:#x} err:{err:?}");
+                Err(err)
             }
         };
 
-        // Entries at level 3 should have the page flag set
-        let entry =
-            if page_size == PageSize::Page4K { entry.with_page_or_table(true) } else { entry };
-
-        vmtrait_impl.write_entry(dest_entry, entry);
+        // Always put back the recursive entry
         vmtrait_impl.write_recursive_entry(pgtype, old_recursive_entry);
-
-        Ok(())
+        result
     }
 
     /// Map the physical range using the requested page size.
@@ -865,5 +864,24 @@ mod tests {
             .expect("error:init:mapping failed");
 
         assert_eq!(mapped_virtrange, VirtRange::new(KZERO + 4096, KZERO + 8 * 4096));
+    }
+
+    #[test]
+    fn map_to_restores_recursive_entry_when_allocation_fails() {
+        let mut table = RootPageTable::empty();
+        let mut test_page_allocator = TestPageAllocator::new(&mut []);
+        let mut test_vmtrait_impl = TestVmTrait::new();
+
+        let result = table.map_to(
+            &mut test_page_allocator,
+            &mut test_vmtrait_impl,
+            Entry::rw_kernel_data(),
+            KZERO,
+            PageSize::Page4K,
+            RootPageTableType::Kernel,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(test_vmtrait_impl.root_page_table.entries[511], Entry::empty());
     }
 }
