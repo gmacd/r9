@@ -770,15 +770,19 @@ mod tests {
         );
     }
 
+    // Holds a raw pointer to its pages rather than a reference: any use of a
+    // reference to them would invalidate the pointers already handed out.
     struct TestPageAllocator {
-        free_pages: [PhysPage4K; 4],
+        free_pages: *mut PhysPage4K,
+        num_pages: usize,
         next_page_idx: usize,
     }
 
     impl TestPageAllocator {
-        fn new() -> Self {
+        fn new(free_pages: &mut [PhysPage4K]) -> Self {
             Self {
-                free_pages: core::array::from_fn(|_| PhysPage4K([0u8; PAGE_SIZE_4K])),
+                free_pages: free_pages.as_mut_ptr(),
+                num_pages: free_pages.len(),
                 next_page_idx: 0,
             }
         }
@@ -786,10 +790,10 @@ mod tests {
 
     impl PageAllocator for TestPageAllocator {
         fn alloc_physpage(&mut self) -> Result<PhysAddr, PageAllocError> {
-            if self.next_page_idx < self.free_pages.len() {
-                let next_page = &self.free_pages[self.next_page_idx];
+            if self.next_page_idx < self.num_pages {
+                let next_page = unsafe { self.free_pages.add(self.next_page_idx) };
                 self.next_page_idx += 1;
-                Ok(PhysAddr::new(next_page as *const PhysPage4K as u64))
+                Ok(PhysAddr::new(next_page as u64))
             } else {
                 Err(PageAllocError::OutOfSpace)
             }
@@ -842,7 +846,9 @@ mod tests {
     #[test]
     fn map_phys_range_test() {
         let mut table = RootPageTable::empty();
-        let mut test_page_allocator = TestPageAllocator::new();
+        let mut free_pages: [PhysPage4K; 4] =
+            core::array::from_fn(|_| PhysPage4K([0u8; PAGE_SIZE_4K]));
+        let mut test_page_allocator = TestPageAllocator::new(&mut free_pages);
         let mut test_vmtrait_impl = TestVmTrait::new();
 
         let mapped_virtrange = table
