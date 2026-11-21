@@ -8,6 +8,7 @@ use std::{
     fs::{self, File, create_dir_all},
     io::Write,
     process::exit,
+    thread,
 };
 
 /// build section
@@ -255,6 +256,14 @@ fn apply_link(
     }
 }
 
+fn apply_parallelism(rustflags: &mut Vec<String>) {
+    // 8 CPUs has been found by local testing (and in the initial rust documents)
+    // to be the number beyond which there is no scaling benefit.
+    let num_jobs = thread::available_parallelism().map_or(1, |n| n.get()).min(8);
+    rustflags.push("-Zunstable-options".into());
+    rustflags.push(format!("--jobs-frontend={num_jobs}"));
+}
+
 fn apply_qemu_config(cmd: &mut Command, config: &Configuration) {
     if let Some(config) = &config.qemu {
         if let Some(machine) = &config.machine {
@@ -281,6 +290,19 @@ fn apply_rustflags(cmd: &mut Command, rustflags: &[String]) {
 pub fn apply_to_clippy_step(cmd: &mut Command, config: &Configuration) {
     let mut rustflags: Vec<String> = Vec::new();
     apply_platform_config(cmd, &mut rustflags, config);
+    apply_parallelism(&mut rustflags);
+    apply_rustflags(cmd, &rustflags);
+}
+
+pub fn apply_to_check_step(cmd: &mut Command) {
+    let mut rustflags: Vec<String> = Vec::new();
+    apply_parallelism(&mut rustflags);
+    apply_rustflags(cmd, &rustflags);
+}
+
+pub fn apply_to_test_step(cmd: &mut Command) {
+    let mut rustflags: Vec<String> = Vec::new();
+    apply_parallelism(&mut rustflags);
     apply_rustflags(cmd, &rustflags);
 }
 
@@ -290,16 +312,12 @@ pub fn apply_to_build_step(
     target: &str,
     profile: &Profile,
     workspace_path: &str,
-    num_jobs: usize,
 ) {
     let mut rustflags: Vec<String> = Vec::new();
     apply_build(cmd, &mut rustflags, config);
     apply_platform_config(cmd, &mut rustflags, config);
     apply_link(&mut rustflags, config, target, profile, workspace_path);
-
-    rustflags.push("-Zunstable-options".into());
-    rustflags.push(format!("--jobs-frontend={num_jobs}"));
-
+    apply_parallelism(&mut rustflags);
     apply_rustflags(cmd, &rustflags);
 }
 

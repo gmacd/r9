@@ -1,11 +1,13 @@
 use crate::config::Configuration;
-use config::{apply_to_build_step, apply_to_clippy_step, apply_to_qemu_step};
+use config::{
+    apply_to_build_step, apply_to_check_step, apply_to_clippy_step, apply_to_qemu_step,
+    apply_to_test_step,
+};
 use std::{
     env, fmt,
     path::{Path, PathBuf},
     process::{self, Command},
     str::FromStr,
-    thread,
 };
 use target_lexicon::Triple;
 
@@ -291,7 +293,6 @@ struct BuildStep {
     arch: Arch,
     config: Configuration,
     profile: Profile,
-    num_jobs: usize,
     verbose: bool,
 }
 
@@ -302,9 +303,7 @@ impl BuildStep {
         let profile = Profile::from(matches);
         let verbose = verbose(matches);
 
-        let num_jobs = thread::available_parallelism().map_or(1, |n| n.get()).min(8);
-
-        Self { arch, config, profile, num_jobs, verbose }
+        Self { arch, config, profile, verbose }
     }
 
     fn run(self) -> Result<()> {
@@ -317,7 +316,6 @@ impl BuildStep {
             &self.arch.target(),
             &self.profile,
             workspace().to_str().unwrap(),
-            self.num_jobs,
         );
 
         cmd.current_dir(workspace());
@@ -707,6 +705,9 @@ impl TestStep {
             }
 
             cmd.args(cmd_args);
+
+            apply_to_test_step(&mut cmd);
+
             if self.json_output {
                 cmd.arg("--message-format=json").arg("--quiet");
             }
@@ -840,6 +841,8 @@ impl CheckStep {
         for cmd_args in [bins_lib_package_cmd_args, benches_tests_package_cmd_args].concat() {
             let mut cmd = Command::new(cargo());
             cmd.args(cmd_args);
+            apply_to_check_step(&mut cmd);
+
             if self.json_output {
                 cmd.arg("--message-format=json").arg("--quiet");
             }
