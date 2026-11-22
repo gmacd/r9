@@ -112,12 +112,6 @@ el1:	// In EL1
 1:	str	xzr, [x0], #8
 	cmp	x0, x1
 	b.ne	1b
-	// Clear early pagetables
-	ldr	x0, =earlyvm_pagetables_pa
-	ldr	x1, =eearlyvm_pagetables_pa
-1:	str	xzr, [x0], #8
-	cmp	x0, x1
-	b.ne	1b
 
 	bl	init_early_uart_rpi4
 
