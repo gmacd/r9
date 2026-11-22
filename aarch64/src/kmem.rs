@@ -12,6 +12,9 @@ unsafe extern "C" {
     static edata_pa: [u64; 0];
     static bss_pa: [u64; 0];
     static ebss_pa: [u64; 0];
+    static earlyvm_pagetables_pa: [u64; 0];
+    static eearlyvm_pagetables_pa: [u64; 0];
+    static end_pa: [u64; 0];
 }
 
 fn base_physaddr() -> PhysAddr {
@@ -54,6 +57,18 @@ fn ebss_physaddr() -> PhysAddr {
     unsafe { PhysAddr::new(ebss_pa.as_ptr().addr() as u64) }
 }
 
+fn earlyvm_pagetables_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(earlyvm_pagetables_pa.as_ptr().addr() as u64) }
+}
+
+fn eearlyvm_pagetables_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(eearlyvm_pagetables_pa.as_ptr().addr() as u64) }
+}
+
+fn end_physaddr() -> PhysAddr {
+    unsafe { PhysAddr::new(end_pa.as_ptr().addr() as u64) }
+}
+
 pub fn boottext_physrange() -> PhysRange {
     PhysRange::new(base_physaddr(), eboottext_physaddr())
 }
@@ -70,12 +85,21 @@ pub fn data_physrange() -> PhysRange {
     PhysRange::new(data_physaddr(), edata_physaddr())
 }
 
+/// .data, .bss, the early page tables and padding up to the 2MiB-aligned end.
+pub fn rwdata_physrange() -> PhysRange {
+    PhysRange::new(data_physaddr(), end_physaddr())
+}
+
 pub fn bss_physrange() -> PhysRange {
     PhysRange::new(bss_physaddr(), ebss_physaddr())
 }
 
+pub fn earlyvm_pages_physrange() -> PhysRange {
+    PhysRange::new(earlyvm_pagetables_physaddr(), eearlyvm_pagetables_physaddr())
+}
+
 pub fn total_kernel_physrange() -> PhysRange {
-    PhysRange::new(base_physaddr(), ebss_physaddr())
+    PhysRange::new(base_physaddr(), end_physaddr())
 }
 
 /// Transform the physical address to a virtual address, under the assumption that

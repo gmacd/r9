@@ -54,6 +54,9 @@ SECTIONS {
 		*(COMMON)
 		. = ALIGN(4096);
 	}
+	PROVIDE(bss_pa = LOADADDR(.bss));
+	PROVIDE(ebss_pa = LOADADDR(.bss) + SIZEOF(.bss));
+
 
 	/* Reserve section for early pagetables. */
 	.earlyvm_pagetables : ALIGN(4096) {
@@ -63,11 +66,9 @@ SECTIONS {
 	PROVIDE(eearlyvm_pagetables_pa = LOADADDR(.earlyvm_pagetables) + SIZEOF(.earlyvm_pagetables));
 
 
-/* TODO Should this be here???  Better to put into the bss section later */
+	/* Align so we can map data, bss and early pagetables using 2MiB pages */
 	.end : ALIGN(2097152) {}
-
-	PROVIDE(bss_pa = LOADADDR(.bss));
-	PROVIDE(ebss_pa = LOADADDR(.end));
+	PROVIDE(end_pa = LOADADDR(.end));
 
 
 	/DISCARD/ : {
