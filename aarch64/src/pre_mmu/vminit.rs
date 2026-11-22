@@ -9,6 +9,10 @@ use port::{
 };
 
 use crate::{
+    kmem::{
+        boottext_physrange, earlyvm_pages_physrange, rodata_physrange, rwdata_physrange,
+        text_physrange,
+    },
     param::KZERO,
     pre_mmu::util::{putstr, putu64h},
     vm::{
@@ -16,94 +20,6 @@ use crate::{
         RootPageTable, Shareable, Table, VaMapping, va_index,
     },
 };
-
-// These map to definitions in kernel.ld.
-// In pre-MMU state, these will all map to physical addresses on aarch64.
-unsafe extern "C" {
-    static eboottext_pa: [u64; 0];
-    static text_pa: [u64; 0];
-    static etext_pa: [u64; 0];
-    static rodata_pa: [u64; 0];
-    static erodata_pa: [u64; 0];
-    static data_pa: [u64; 0];
-    static edata_pa: [u64; 0];
-    static bss_pa: [u64; 0];
-    static ebss_pa: [u64; 0];
-    static earlyvm_pagetables_pa: [u64; 0];
-    static eearlyvm_pagetables_pa: [u64; 0];
-}
-
-fn base_physaddr() -> PhysAddr {
-    PhysAddr::new(0)
-}
-
-fn eboottext_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(eboottext_pa.as_ptr().addr() as u64) }
-}
-
-fn text_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(text_pa.as_ptr().addr() as u64) }
-}
-
-fn etext_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(etext_pa.as_ptr().addr() as u64) }
-}
-
-fn rodata_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(rodata_pa.as_ptr().addr() as u64) }
-}
-
-fn erodata_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(erodata_pa.as_ptr().addr() as u64) }
-}
-
-fn data_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(data_pa.as_ptr().addr() as u64) }
-}
-
-fn edata_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(edata_pa.as_ptr().addr() as u64) }
-}
-
-fn bss_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(bss_pa.as_ptr().addr() as u64) }
-}
-
-fn ebss_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(ebss_pa.as_ptr().addr() as u64) }
-}
-
-fn earlyvm_pagetables_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(earlyvm_pagetables_pa.as_ptr().addr() as u64) }
-}
-
-fn eearlyvm_pagetables_physaddr() -> PhysAddr {
-    unsafe { PhysAddr::new(eearlyvm_pagetables_pa.as_ptr().addr() as u64) }
-}
-
-pub fn boottext_physrange() -> PhysRange {
-    PhysRange::new(base_physaddr(), eboottext_physaddr())
-}
-
-pub fn text_physrange() -> PhysRange {
-    PhysRange::new(text_physaddr(), etext_physaddr())
-}
-
-pub fn rodata_physrange() -> PhysRange {
-    PhysRange::new(rodata_physaddr(), erodata_physaddr())
-}
-
-pub fn data_physrange() -> PhysRange {
-    PhysRange::new(data_physaddr(), edata_physaddr())
-}
-
-pub fn bss_physrange() -> PhysRange {
-    PhysRange::new(bss_physaddr(), ebss_physaddr())
-}
-
-fn earlyvm_pages_physrange() -> PhysRange {
-    PhysRange::new(earlyvm_pagetables_physaddr(), eearlyvm_pagetables_physaddr())
-}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn init_vm(dtb_pa: u64) {
@@ -121,7 +37,7 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
 
         let text_physrange = boottext_physrange().span_with(text_physrange());
         let ro_data_physrange = rodata_physrange();
-        let data_physrange = data_physrange().span_with(bss_physrange());
+        let data_physrange = rwdata_physrange();
 
         let mut map = [
             ("DTB", dtb_physrange, Entry::ro_kernel_data(), dtb_page_size),

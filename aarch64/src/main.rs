@@ -38,8 +38,8 @@ use reg::midr_el1::MidrEl1;
 use vm::{Entry, RootPageTableType, VaMapping};
 
 use crate::kmem::{
-    boottext_physrange, bss_physrange, data_physrange, rodata_physrange, text_physrange,
-    total_kernel_physrange,
+    boottext_physrange, bss_physrange, data_physrange, earlyvm_pages_physrange, rodata_physrange,
+    rwdata_physrange, text_physrange, total_kernel_physrange,
 };
 use crate::vm::PageSize;
 
@@ -58,6 +58,7 @@ fn print_binary_sections() {
     print_memory_range("rodata:\t", rodata_physrange());
     print_memory_range("data:\t\t", data_physrange());
     print_memory_range("bss:\t\t", bss_physrange());
+    print_memory_range("earlypages:\t", earlyvm_pages_physrange());
     print_memory_range("total:\t", total_kernel_physrange());
 }
 
@@ -123,7 +124,7 @@ pub extern "C" fn main9(dtb_va: usize) {
         dtb_physrange.round(PageSize::Page4K.size()),
         boottext_physrange().span_with(text_physrange()),
         rodata_physrange(),
-        data_physrange().span_with(bss_physrange()),
+        rwdata_physrange(),
     ];
     physranges.sort_by_key(|a| a.start);
     if let Err(err) = pagealloc::init_page_allocator(&dt, physranges.into_iter()) {
