@@ -347,10 +347,6 @@ fn next_mut<'a, A: PageAllocator>(
             }
         };
 
-        // Clear out the new page
-        let page = unsafe { &mut *(page_pa.addr() as *mut PhysPage4K) };
-        page.clear();
-
         // Add same entry to parent table and recursive entry of new table
         entry = Entry::empty()
             .with_access_permission(AccessPermission::PrivRw)
@@ -396,6 +392,7 @@ impl EarlyPageAllocator {
         let pages_start = earlyvm_pages_physrange.start.addr();
         let pages_pa = pages_start as *mut PhysPage4K;
         let num_pages = earlyvm_pages_physrange.size() / core::mem::size_of::<PhysPage4K>();
+
         for i in 0..num_pages {
             unsafe { (*pages_pa.add(i)).clear() };
         }
@@ -410,7 +407,6 @@ impl PageAllocator for EarlyPageAllocator {
             let next_page = unsafe { self.pages_pa.add(self.next_page_idx) };
             self.next_page_idx += 1;
             let pa = PhysAddr::new(next_page as u64);
-            unsafe { &mut *(pa.0 as *mut PhysPage4K) }.clear();
             Ok(pa)
         } else {
             putstr("error:vminit:alloc_physpage:Out of space");
