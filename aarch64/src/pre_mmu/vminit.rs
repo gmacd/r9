@@ -258,7 +258,6 @@ fn putpagetableerror(err: &PageTableError) {
             putstr("range not aligned to page size ");
             putu64h(page_size.size() as u64);
         }
-        PageTableError::MappingRecursiveIndex => putstr("va uses the recursive index"),
     }
 }
 
