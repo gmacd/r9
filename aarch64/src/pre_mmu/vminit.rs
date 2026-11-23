@@ -4,7 +4,7 @@ use aarch64_cpu::{
 };
 use port::{
     fdt::DeviceTree,
-    mem::{PhysAddr, PhysRange, VirtRange},
+    mem::{PhysAddr, PhysRange},
     pagealloc::PageAllocError,
 };
 
@@ -16,8 +16,8 @@ use crate::{
     param::KZERO,
     pre_mmu::util::{putstr, putu64h},
     vm::{
-        AccessPermission, Entry, Level, Mair, PageAllocator, PageSize, PageTableError, PhysPage4K,
-        RootPageTable, Shareable, Table, VaMapping, va_index,
+        AccessPermission, Entry, IdentityVmTrait, Mair, PageAllocator, PageSize, PageTableError,
+        PhysPage4K, RootPageTable, RootPageTableType, Shareable, Table, VaMapping,
     },
 };
 
@@ -64,6 +64,8 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
         .with_valid(true)
         .with_page_or_table(true);
 
+    let mut vmtrait_impl = IdentityVmTrait::default();
+
     for (name, range, flags, page_size) in custom_map.iter() {
         putstr(name);
         putstr(" ");
@@ -72,23 +74,28 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
         putu64h(range.end.addr());
         putstr(" -> ");
 
-        let Ok(mapped_virtrange) = map_phys_range(
-            root_page_table,
+        match root_page_table.map_phys_range(
             &mut physpage_allocator,
-            name,
+            &mut vmtrait_impl,
             *range,
             VaMapping::Offset(KZERO),
             *flags,
             *page_size,
-        ) else {
-            putstr("error:vminit:init_vm: map_phys_range failed\n");
-            panic!();
+            RootPageTableType::Kernel,
+        ) {
+            Ok(mapped_virtrange) => {
+                putu64h(mapped_virtrange.start as u64);
+                putstr("..");
+                putu64h(mapped_virtrange.end as u64);
+                putstr("\n");
+            }
+            Err(err) => {
+                putstr("error:vminit:init_vm: map_phys_range failed: ");
+                putpagetableerror(&err);
+                putstr("\n");
+                panic!();
+            }
         };
-
-        putu64h(mapped_virtrange.start as u64);
-        putstr("..");
-        putu64h(mapped_virtrange.end as u64);
-        putstr("\n");
     }
     // puttable(&root_page_table);
     // let page_table1: &Table =
@@ -238,146 +245,21 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
     putstr("vminit:init_vm: complete\n");
 }
 
-/// Map the physical range using the requested page size.
-/// This aligns on page size boundaries, and rounds the requested range so
-/// that both the alignment requirements are met and the requested range are
-/// covered.
-/// TODO Assuming some of these requests are dynamic, but should not fail,
-/// we should fall back to the smaller page sizes if the requested size fails.
-fn map_phys_range<A: PageAllocator>(
-    root_page_table: &mut RootPageTable,
-    page_allocator: &mut A,
-    debug_name: &str,
-    range: PhysRange,
-    va_mapping: VaMapping,
-    entry: Entry,
-    page_size: PageSize,
-) -> Result<VirtRange, PageTableError> {
-    if !range.start.is_multiple_of(page_size.size() as u64)
-        || !range.end.is_multiple_of(page_size.size() as u64)
-    {
-        putstr("error:vminit:map_phys_range:range not on page boundary: ");
-        putstr(debug_name);
-        putstr("\n");
-        return Err(PageTableError::PhysRangeIsNotOnPageBoundary);
-    }
-
-    let mut startva = None;
-    let mut endva = 0;
-    let mut currva = 0;
-    for pa in range.step_by_rounded(page_size.size()) {
-        if startva.is_none() {
-            currva = va_mapping.map(pa);
-            startva = Some(currva);
-        } else {
-            currva += page_size.size();
+/// Print a PageTableError.  println! can't be used before the MMU is on.
+fn putpagetableerror(err: &PageTableError) {
+    match err {
+        PageTableError::AllocationFailed(_) => putstr("out of early page table pages"),
+        PageTableError::EntryIsNotTable(entry) => {
+            putstr("entry is not a table: ");
+            putu64h(entry.0);
         }
-        endva = currva + page_size.size();
-        if map_to(root_page_table, page_allocator, entry.with_phys_addr(pa), currva, page_size)
-            .is_err()
-        {
-            putstr("error:vminit:map_phys_range:map_to failed: ");
-            putstr(debug_name);
-            putstr("\n");
+        PageTableError::PhysRangeIsZero => putstr("range is empty"),
+        PageTableError::PhysRangeIsNotOnPageBoundary(_, page_size) => {
+            putstr("range not aligned to page size ");
+            putu64h(page_size.size() as u64);
         }
+        PageTableError::MappingRecursiveIndex => putstr("va uses the recursive index"),
     }
-    startva.map(|startva| VirtRange::new(startva, endva)).ok_or(PageTableError::PhysRangeIsZero)
-}
-
-/// Ensure there's a mapping from va to entry, creating any intermediate
-/// page tables that don't already exist.  If a mapping already exists,
-/// replace it.
-/// root_page_table should be a direct va - not a recursive va.
-fn map_to<A: PageAllocator>(
-    root_page_table: &mut RootPageTable,
-    page_allocator: &mut A,
-    entry: Entry,
-    va: usize,
-    page_size: PageSize,
-) -> Result<(), PageTableError> {
-    let dest_entry = match page_size {
-        PageSize::Page4K => next_mut(root_page_table, page_allocator, Level::Level0, va)
-            .and_then(|t1| next_mut(t1, page_allocator, Level::Level1, va))
-            .and_then(|t2| next_mut(t2, page_allocator, Level::Level2, va))
-            .and_then(|t3| entry_mut(t3, Level::Level3, va)),
-        PageSize::Page2M => next_mut(root_page_table, page_allocator, Level::Level0, va)
-            .and_then(|t1| next_mut(t1, page_allocator, Level::Level1, va))
-            .and_then(|t2| entry_mut(t2, Level::Level2, va)),
-        PageSize::Page1G => next_mut(root_page_table, page_allocator, Level::Level0, va)
-            .and_then(|t1| entry_mut(t1, Level::Level1, va)),
-    };
-    let dest_entry = match dest_entry {
-        Ok(e) => e,
-        Err(err) => {
-            putstr("error:vminit:map_to:couldn't find page table entry.");
-            return Err(err);
-        }
-    };
-
-    // Entries at level 3 should have the page flag set
-    let entry = if page_size == PageSize::Page4K { entry.with_page_or_table(true) } else { entry };
-    *dest_entry = entry;
-
-    Ok(())
-}
-
-/// Return the next table in the walk.  If it doesn't exist, create it.
-fn next_mut<'a, A: PageAllocator>(
-    table: &mut Table,
-    page_allocator: &mut A,
-    level: Level,
-    va: usize,
-) -> Result<&'a mut Table, PageTableError> {
-    // Try to get a valid page table entry.  If it doesn't exist, create it.
-    let index = va_index(va, level);
-    if index == 511 {
-        putstr("error:vminit:next_mut:can't use the recursive index");
-        return Err(PageTableError::MappingRecursiveIndex);
-    }
-
-    let mut entry = table.entries[index];
-    if !entry.valid() {
-        // Create a new page table and write the entry into the parent table
-        let page_pa = page_allocator.alloc_physpage();
-        let page_pa = match page_pa {
-            Ok(p) => p,
-            Err(err) => {
-                putstr("error:vminit:next_mut:can't allocate physpage");
-                return Err(PageTableError::AllocationFailed(err));
-            }
-        };
-
-        // Add same entry to parent table and recursive entry of new table
-        entry = Entry::empty()
-            .with_access_permission(AccessPermission::PrivRw)
-            //.with_shareable(Shareable::Inner)
-            .with_accessed(true)
-            .with_mair_index(Mair::Normal)
-            .with_phys_addr(page_pa)
-            .with_valid(true)
-            .with_page_or_table(true);
-
-        table.entries[index] = entry;
-
-        let new_table = unsafe { &mut *(page_pa.addr() as *mut Table) };
-        new_table.entries[511] = entry;
-        Ok(new_table)
-    } else if !entry.is_table(level) {
-        putstr("error:vminit:next_mut:entry is not a valid table entry");
-        Err(PageTableError::EntryIsNotTable)
-    } else {
-        // Return the address of the next table as a recursive address
-        let next_table = unsafe { &mut *(entry.phys_addr().addr() as *mut Table) };
-        Ok(next_table)
-    }
-}
-
-/// Return a mutable entry from the table based on the virtual address and
-/// the level.  (It uses the level to extract the index from the correct
-/// part of the virtual address).
-pub fn entry_mut(table: &mut Table, level: Level, va: usize) -> Result<&mut Entry, PageTableError> {
-    let idx = va_index(va, level);
-    Ok(&mut table.entries[idx])
 }
 
 struct EarlyPageAllocator {

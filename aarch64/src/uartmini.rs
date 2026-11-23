@@ -54,33 +54,32 @@ impl MiniUart {
 
     pub fn new_with_map_ranges(dt: &DeviceTree) -> Result<MiniUart> {
         let gpio_physrange = Self::find_gpio_physrange(dt)?;
-        let gpio_virtrange = match map_device_register("gpio", gpio_physrange, vm::PageSize::Page4K)
-        {
+        let gpio_virtrange = match map_device_register(gpio_physrange, vm::PageSize::Page4K) {
             Ok(gpio_virtrange) => gpio_virtrange,
             Err(msg) => {
-                println!("can't map gpio {:?}", msg);
+                println!("can't map gpio {msg:?}");
                 return Err("can't create miniuart");
             }
         };
 
         let aux_physrange = Self::find_aux_physrange(dt)?;
-        let aux_virtrange = match map_device_register("aux", aux_physrange, vm::PageSize::Page4K) {
+        let aux_virtrange = match map_device_register(aux_physrange, vm::PageSize::Page4K) {
             Ok(aux_virtrange) => aux_virtrange,
             Err(msg) => {
-                println!("can't map aux {:?}", msg);
+                println!("can't map aux {msg:?}");
                 return Err("can't create miniuart");
             }
         };
 
         let miniuart_physrange = Self::find_miniuart_physrange(dt)?;
-        let miniuart_virtrange =
-            match map_device_register("miniuart", miniuart_physrange, vm::PageSize::Page4K) {
-                Ok(aux_virtrange) => aux_virtrange,
-                Err(msg) => {
-                    println!("can't map miniuart {:?}", msg);
-                    return Err("can't create miniuart");
-                }
-            };
+        let miniuart_virtrange = match map_device_register(miniuart_physrange, vm::PageSize::Page4K)
+        {
+            Ok(aux_virtrange) => aux_virtrange,
+            Err(msg) => {
+                println!("can't map miniuart {msg:?}");
+                return Err("can't create miniuart");
+            }
+        };
 
         Ok(MiniUart { gpio_virtrange, aux_virtrange, miniuart_virtrange })
     }

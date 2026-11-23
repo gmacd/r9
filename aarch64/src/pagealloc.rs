@@ -91,22 +91,24 @@ pub fn allocate_virtpage(
     let mut physpage_allocator = PhysPageAllocator {};
     let mut vmtrait_impl = VmTraitImpl {};
 
-    if let Ok(page_va) = page_table.map_phys_range(
+    match page_table.map_phys_range(
         &mut physpage_allocator,
         &mut vmtrait_impl,
-        debug_name,
         range,
         va,
         entry,
         crate::vm::PageSize::Page4K,
         pgtype,
     ) {
-        // println!("pagealloc:allocate_virtpage:va:{:#x} -> physpage:{:?}", page_va.start(), page_pa);
-        let virtpage = page_va.start as *mut VirtPage4K;
-        Ok(unsafe { &mut *virtpage })
-    } else {
-        println!("error:pagealloc:allocate_virtpage:unable to map");
-        Err(PageAllocError::UnableToMap)
+        Ok(page_va) => {
+            // println!("pagealloc:allocate_virtpage:va:{:#x} -> physpage:{:?}", page_va.start(), page_pa);
+            let virtpage = page_va.start as *mut VirtPage4K;
+            Ok(unsafe { &mut *virtpage })
+        }
+        Err(err) => {
+            println!("error:pagealloc:allocate_virtpage:unable to map:{debug_name}, {err:?}");
+            Err(PageAllocError::UnableToMap)
+        }
     }
 }
 

@@ -30,7 +30,7 @@ pub fn init(dt: &DeviceTree) {
             *mailbox = Some(mbox);
         }
         Err(msg) => {
-            println!("can't initialise mailbox: {:?}", msg);
+            println!("can't initialise mailbox: {msg:?}");
         }
     }
 }
@@ -48,15 +48,15 @@ impl Mailbox {
         // Allocate a page of device memory for the mailbox request/response buffer
         // TODO Split this into multiple buffers to allow parallel requests.
         let (req_buf_virtrange, req_buf_physrange) =
-            deviceutil::alloc_device_page("mailboxbuf", vm::PageSize::Page4K)?;
+            deviceutil::alloc_device_page(vm::PageSize::Page4K)?;
 
         let mbox_physrange = Self::find_mbox_physrange(dt)?;
-        let mbox = match map_device_register("mailbox", mbox_physrange, vm::PageSize::Page4K) {
+        let mbox = match map_device_register(mbox_physrange, vm::PageSize::Page4K) {
             Ok(mbox_virtrange) => {
                 Ok(Mailbox { mbox_virtrange, req_buf_virtrange, req_buf_physrange })
             }
             Err(msg) => {
-                println!("can't map mailbox {:?}", msg);
+                println!("can't map mailbox {msg:?}");
                 Err("can't create mailbox")
             }
         }?;

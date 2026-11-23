@@ -35,24 +35,22 @@ pub struct Pl011Uart {
 impl Pl011Uart {
     pub fn new(dt: &DeviceTree) -> Result<Pl011Uart> {
         let gpio_physrange = Self::find_gpio_physrange(dt)?;
-        let gpio_virtrange = match map_device_register("gpio", gpio_physrange, vm::PageSize::Page4K)
-        {
+        let gpio_virtrange = match map_device_register(gpio_physrange, vm::PageSize::Page4K) {
             Ok(gpio_virtrange) => gpio_virtrange,
             Err(msg) => {
-                println!("can't map gpio {:?}", msg);
+                println!("can't map gpio {msg:?}");
                 return Err("can't create pl011");
             }
         };
 
         let pl011_physrange = Self::find_pl011_physrange(dt)?;
-        let pl011_virtrange =
-            match map_device_register("pl011", pl011_physrange, vm::PageSize::Page4K) {
-                Ok(pl011_virtrange) => pl011_virtrange,
-                Err(msg) => {
-                    println!("can't map pl011 {:?}", msg);
-                    return Err("can't create pl011");
-                }
-            };
+        let pl011_virtrange = match map_device_register(pl011_physrange, vm::PageSize::Page4K) {
+            Ok(pl011_virtrange) => pl011_virtrange,
+            Err(msg) => {
+                println!("can't map pl011 {msg:?}");
+                return Err("can't create pl011");
+            }
+        };
 
         Ok(Pl011Uart { gpio_virtrange, pl011_virtrange })
     }
