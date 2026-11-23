@@ -303,7 +303,6 @@ pub enum PageTableError {
     EntryIsNotTable(Entry),
     PhysRangeIsZero,
     PhysRangeIsNotOnPageBoundary(PhysRange, PageSize),
-    MappingRecursiveIndex,
 }
 
 impl From<PageAllocError> for PageTableError {
