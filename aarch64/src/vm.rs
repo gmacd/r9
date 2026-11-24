@@ -297,12 +297,12 @@ fn recursive_table_addr(pgtype: RootPageTableType, va: usize, level: Level) -> u
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum PageTableError {
     AllocationFailed(PageAllocError),
     EntryIsNotTable(Entry),
     PhysRangeIsZero,
     PhysRangeIsNotOnPageBoundary(PhysRange, PageSize),
+    MappingRecursiveIndex(usize),
 }
 
 impl From<PageAllocError> for PageTableError {
@@ -405,6 +405,12 @@ impl RootPageTable {
         page_size: PageSize,
         pgtype: RootPageTableType,
     ) -> Result<(), PageTableError> {
+        // The last root entry is the recursive entry.  Walking through it would
+        // lead back to the root table, so nothing can be mapped there.
+        if va_index(va, Level::Level0) == 511 {
+            return Err(PageTableError::MappingRecursiveIndex(va));
+        }
+
         // We change the last entry of the root page table to the address of
         // self for the duration of this method.  This allows us to work with
         // this hierarchy of pagetables even if it's not the current translation
@@ -855,5 +861,27 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(test_vmtrait_impl.recursive_entry, Entry::empty());
+    }
+
+    #[test]
+    fn map_to_rejects_recursive_index() {
+        let mut table = RootPageTable::empty();
+        let mut test_page_allocator = TestPageAllocator::new(&mut []);
+        let mut test_vmtrait_impl = IdentityVmTrait::default();
+
+        let result = table.map_to(
+            &mut test_page_allocator,
+            &mut test_vmtrait_impl,
+            Entry::rw_kernel_data(),
+            0xffff_ff80_0000_0000,
+            PageSize::Page4K,
+            RootPageTableType::Kernel,
+        );
+
+        assert!(matches!(
+            result,
+            Err(PageTableError::MappingRecursiveIndex(0xffff_ff80_0000_0000))
+        ));
+        assert!(table.entries.iter().all(|e| *e == Entry::empty()));
     }
 }

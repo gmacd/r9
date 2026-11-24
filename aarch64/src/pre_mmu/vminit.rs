@@ -91,7 +91,7 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
             }
             Err(err) => {
                 putstr("error:vminit:init_vm: map_phys_range failed: ");
-                putpagetableerror(&err);
+                putpagetableerror(err);
                 putstr("\n");
                 panic!();
             }
@@ -246,7 +246,7 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
 }
 
 /// Print a PageTableError.  println! can't be used before the MMU is on.
-fn putpagetableerror(err: &PageTableError) {
+fn putpagetableerror(err: PageTableError) {
     match err {
         PageTableError::AllocationFailed(page_alloc_error) => {
             putstr("allocation failed");
@@ -257,6 +257,10 @@ fn putpagetableerror(err: &PageTableError) {
             putu64h(entry.0);
         }
         PageTableError::PhysRangeIsZero => putstr("range is empty"),
+        PageTableError::MappingRecursiveIndex(va) => {
+            putstr("va uses the recursive index: ");
+            putu64h(va as u64);
+        }
         PageTableError::PhysRangeIsNotOnPageBoundary(phys_range, page_size) => {
             putstr("range not aligned to page size. range: ");
             putu64h(phys_range.start.0);
@@ -269,7 +273,7 @@ fn putpagetableerror(err: &PageTableError) {
 }
 
 /// Print a PageAllocError.  println! can't be used before the MMU is on.
-fn putpageallocerror(err: &PageAllocError) {
+fn putpageallocerror(err: PageAllocError) {
     match err {
         PageAllocError::OutOfBounds => putstr("out of bounds"),
         PageAllocError::MisalignedAddr => putstr("misaligned address"),
