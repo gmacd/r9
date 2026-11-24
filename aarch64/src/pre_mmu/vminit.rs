@@ -248,16 +248,34 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
 /// Print a PageTableError.  println! can't be used before the MMU is on.
 fn putpagetableerror(err: &PageTableError) {
     match err {
-        PageTableError::AllocationFailed(_) => putstr("out of early page table pages"),
+        PageTableError::AllocationFailed(page_alloc_error) => {
+            putstr("allocation failed");
+            putpageallocerror(page_alloc_error);
+        }
         PageTableError::EntryIsNotTable(entry) => {
             putstr("entry is not a table: ");
             putu64h(entry.0);
         }
         PageTableError::PhysRangeIsZero => putstr("range is empty"),
-        PageTableError::PhysRangeIsNotOnPageBoundary(_, page_size) => {
-            putstr("range not aligned to page size ");
+        PageTableError::PhysRangeIsNotOnPageBoundary(phys_range, page_size) => {
+            putstr("range not aligned to page size. range: ");
+            putu64h(phys_range.start.0);
+            putstr("..");
+            putu64h(phys_range.end.0);
+            putstr(" size: ");
             putu64h(page_size.size() as u64);
         }
+    }
+}
+
+/// Print a PageAllocError.  println! can't be used before the MMU is on.
+fn putpageallocerror(err: &PageAllocError) {
+    match err {
+        PageAllocError::OutOfBounds => putstr("out of bounds"),
+        PageAllocError::MisalignedAddr => putstr("misaligned address"),
+        PageAllocError::OutOfSpace => putstr("out of space"),
+        PageAllocError::NotAllocated => putstr("not allocated"),
+        PageAllocError::UnableToMap => putstr("unable to map"),
     }
 }
 
