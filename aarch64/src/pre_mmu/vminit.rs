@@ -249,11 +249,13 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
 fn putpagetableerror(err: PageTableError) {
     match err {
         PageTableError::AllocationFailed(page_alloc_error) => {
-            putstr("allocation failed");
+            putstr("allocation failed: ");
             putpageallocerror(page_alloc_error);
         }
-        PageTableError::EntryIsNotTable(entry) => {
-            putstr("entry is not a table: ");
+        PageTableError::EntryIsNotTable(va, entry) => {
+            putstr("entry is not a table. va: ");
+            putu64h(va as u64);
+            putstr(" entry: ");
             putu64h(entry.0);
         }
         PageTableError::PhysRangeIsZero => putstr("range is empty"),
