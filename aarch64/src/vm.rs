@@ -299,7 +299,7 @@ fn recursive_table_addr(pgtype: RootPageTableType, va: usize, level: Level) -> u
 #[derive(Debug)]
 pub enum PageTableError {
     AllocationFailed(PageAllocError),
-    EntryIsNotTable(Entry),
+    EntryIsNotTable(usize, Entry),
     PhysRangeIsZero,
     PhysRangeIsNotOnPageBoundary(PhysRange, PageSize),
     MappingRecursiveIndex(usize),
@@ -339,7 +339,7 @@ impl Table {
         let mut entry = self.entries[index];
 
         if entry.valid() && !entry.is_table(level) {
-            return Err(PageTableError::EntryIsNotTable(entry));
+            return Err(PageTableError::EntryIsNotTable(va, entry));
         }
 
         if entry.valid() {
@@ -633,8 +633,8 @@ pub trait VmTrait {
     fn generate_temp_recursive_address(&self, table: &Table) -> Entry;
 
     /// Resolve the next table or page from an entry.  In the kernel, this uses recursive
-    /// page table addressing.  In tests, it uses the physical address directly
-    /// from the entry (which is a valid virtual address in the test environment).
+    /// page table addressing.  In pre-mmu or test code, it uses the physical address directly
+    /// from the entry (which would be a valid virtual address in these environments).
     fn resolve_entry_mut<T>(
         &self,
         entry: Entry,
