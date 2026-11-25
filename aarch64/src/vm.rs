@@ -9,7 +9,8 @@ use crate::{
     param::KZERO,
 };
 use bitstruct::bitstruct;
-use core::{fmt, ptr, sync::atomic::Ordering};
+use core::intrinsics::volatile_set_memory;
+use core::{arch::asm, fmt, ptr, sync::atomic::Ordering};
 use core::{ptr::write_volatile, sync::atomic::AtomicUsize};
 use num_enum::{FromPrimitive, IntoPrimitive};
 use port::{
@@ -21,7 +22,6 @@ use port::{
 static mut USER_PAGETABLE: RootPageTable = RootPageTable::empty();
 
 pub fn kernel_pagetable() -> &'static mut RootPageTable {
-    //unsafe { &mut *ptr::addr_of_mut!(KERNEL_PAGETABLE) }
     root_page_table(RootPageTableType::Kernel)
 }
 
@@ -52,9 +52,7 @@ pub struct PhysPage4K([u8; PAGE_SIZE_4K]);
 
 impl PhysPage4K {
     pub fn clear(&mut self) {
-        unsafe {
-            core::intrinsics::volatile_set_memory(&mut self.0, 0u8, 1);
-        }
+        unsafe { volatile_set_memory(&mut self.0, 0u8, 1) };
     }
 }
 
@@ -538,74 +536,40 @@ pub enum RootPageTableType {
 
 /// Return the root user-level page table physical address
 fn ttbr0_el1() -> PhysAddr {
-    #[cfg(not(test))]
-    {
-        let mut addr: u64;
-        unsafe {
-            core::arch::asm!("mrs {value}, ttbr0_el1", value = out(reg) addr);
-        }
-        PhysAddr::new(addr)
-    }
-    #[cfg(test)]
-    PhysAddr::new(0)
+    let addr: u64;
+    unsafe { asm!("mrs {value}, ttbr0_el1", value = out(reg) addr) };
+    PhysAddr::new(addr)
 }
 
 /// Return the root kernel page table physical address
 fn ttbr1_el1() -> PhysAddr {
-    #[cfg(not(test))]
-    {
-        let mut addr: u64;
-        unsafe {
-            core::arch::asm!("mrs {value}, ttbr1_el1", value = out(reg) addr);
-        }
-        PhysAddr::new(addr)
-    }
-    #[cfg(test)]
-    PhysAddr::new(0)
+    let addr: u64;
+    unsafe { asm!("mrs {value}, ttbr1_el1", value = out(reg) addr) };
+    PhysAddr::new(addr)
 }
 
-// TODO this should just call invalidate_all_tlb_entries afterwards?
-#[allow(unused_variables)]
 pub unsafe fn switch(page_table: &RootPageTable, pgtype: RootPageTableType) {
-    #[cfg(not(test))]
     unsafe {
         let pt_phys = from_ptr_to_physaddr_offset_from_kzero(page_table).addr();
-        // https://forum.osdev.org/viewtopic.php?t=36412&p=303237
         match pgtype {
-            RootPageTableType::User => {
-                core::arch::asm!(
-                    "msr ttbr0_el1, {pt_phys}",
-                    "tlbi vmalle1is", // invalidate all TLB entries
-                    "dsb ish",      // ensure write has completed
-                    "isb",          // synchronize context and ensure that no instructions
-                                    // are fetched using the old translation
-                    pt_phys = in(reg) pt_phys);
-            }
-            RootPageTableType::Kernel => {
-                core::arch::asm!(
-                    "msr ttbr1_el1, {pt_phys}",
-                    "tlbi vmalle1is", // invalidate all TLB entries
-                    "dsb ish",      // ensure write has completed
-                    "isb",          // synchronize context and ensure that no instructions
-                                    // are fetched using the old translation
-                    pt_phys = in(reg) pt_phys);
-            }
+            RootPageTableType::User => switch_ttbr0(pt_phys),
+            RootPageTableType::Kernel => switch_ttbr1(pt_phys),
         }
+
+        invalidate_all_tlb_entries();
     }
 }
 
-#[allow(unused_variables)]
+unsafe fn switch_ttbr0(pt_phys: u64) {
+    unsafe { asm!("dsb ishst", "msr ttbr0_el1, {pt_phys}", "isb", pt_phys = in(reg) pt_phys) };
+}
+
+unsafe fn switch_ttbr1(pt_phys: u64) {
+    unsafe { asm!("dsb ishst", "msr ttbr1_el1, {pt_phys}", "isb", pt_phys = in(reg) pt_phys) };
+}
+
 pub unsafe fn invalidate_all_tlb_entries() {
-    #[cfg(not(test))]
-    unsafe {
-        // https://forum.osdev.org/viewtopic.php?t=36412&p=303237
-        core::arch::asm!(
-            "tlbi vmalle1is", // invalidate all TLB entries
-            "dsb ish",        // ensure write has completed
-            "isb"             // synchronize context and ensure that no instructions
-                              // are fetched using the old translation
-        );
-    }
+    unsafe { asm!("dsb ishst", "tlbi vmalle1is", "dsb ish", "isb") };
 }
 
 pub trait PageAllocator {

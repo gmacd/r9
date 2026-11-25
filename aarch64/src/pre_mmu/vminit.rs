@@ -1,7 +1,6 @@
-use aarch64_cpu::{
-    asm::barrier::{self, dsb},
-    registers::*,
-};
+use core::arch::asm;
+
+use aarch64_cpu::registers::*;
 use port::{
     fdt::DeviceTree,
     mem::{PhysAddr, PhysRange},
@@ -18,6 +17,7 @@ use crate::{
     vm::{
         AccessPermission, Entry, IdentityVmTrait, Mair, PageAllocator, PageSize, PageTableError,
         PhysPage4K, RootPageTable, RootPageTableType, Shareable, Table, VaMapping,
+        invalidate_all_tlb_entries,
     },
 };
 
@@ -233,14 +233,10 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
     //  [1] 0x00 - Device (Non-gathering, non-reordering, no early write acknowledgement (most restrictive))
     MAIR_EL1.set(0x00ff);
 
-    // https://forum.osdev.org/viewtopic.php?t=36412&p=303237
-    #[cfg(not(test))]
     unsafe {
-        // invalidate all TLB entries
-        core::arch::asm!("tlbi vmalle1is")
-    };
-
-    dsb(barrier::ISH);
+        asm!("isb", options(nostack, preserves_flags));
+        invalidate_all_tlb_entries();
+    }
 
     putstr("vminit:init_vm: complete\n");
 }
