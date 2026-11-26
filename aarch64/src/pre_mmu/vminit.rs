@@ -248,6 +248,12 @@ fn putpagetableerror(err: PageTableError) {
             putstr("allocation failed: ");
             putpageallocerror(page_alloc_error);
         }
+        PageTableError::AlreadyMapped(va, entry) => {
+            putstr("already mapped. va: ");
+            putu64h(va as u64);
+            putstr(" entry: ");
+            putu64h(entry.0);
+        }
         PageTableError::EntryIsNotTable(va, entry) => {
             putstr("entry is not a table. va: ");
             putu64h(va as u64);

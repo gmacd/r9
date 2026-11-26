@@ -294,9 +294,10 @@ fn recursive_table_addr(pgtype: RootPageTableType, va: usize, level: Level) -> u
     msbits | recursive_indices | ((indices >> shift) & indices_mask)
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum PageTableError {
     AllocationFailed(PageAllocError),
+    AlreadyMapped(usize, Entry),
     EntryIsNotTable(usize, Entry),
     PhysRangeIsZero,
     PhysRangeIsNotOnPageBoundary(PhysRange, PageSize),
@@ -392,7 +393,7 @@ impl RootPageTable {
 
     /// Ensure there's a mapping from va to entry, creating any intermediate
     /// page tables that don't already exist.  If a mapping already exists,
-    /// replace it.
+    /// return AlreadyMapped error.
     /// root_page_table should be a direct va - not a recursive va.
     fn map_to<A: PageAllocator, B: VmTrait>(
         &mut self,
@@ -433,11 +434,15 @@ impl RootPageTable {
                 .and_then(|t1| t1.entry_mut(Level::Level1, va)),
         };
 
-        let result = dest_entry.map(|e| {
+        let result = dest_entry.and_then(|e| {
+            if e.valid() {
+                return Err(PageTableError::AlreadyMapped(va, *e));
+            }
             // Entries at level 3 (where the page size is 4K) should have the page flag set.
             // Larger page sizes set this to false.
             let entry = entry.with_page_or_table(page_size == PageSize::Page4K);
             vmtrait_impl.write_entry(e, entry);
+            Ok(())
         });
 
         // Always put back the recursive entry
@@ -788,8 +793,7 @@ mod tests {
     #[test]
     fn map_phys_range_test() {
         let mut table = RootPageTable::empty();
-        let mut free_pages: [PhysPage4K; 4] =
-            core::array::from_fn(|_| PhysPage4K([0u8; PAGE_SIZE_4K]));
+        let mut free_pages = [const { PhysPage4K([0; PAGE_SIZE_4K]) }; 4];
         let mut test_page_allocator = TestPageAllocator::new(&mut free_pages);
         let mut test_vmtrait_impl = IdentityVmTrait::default();
 
@@ -842,10 +846,46 @@ mod tests {
             RootPageTableType::Kernel,
         );
 
-        assert!(matches!(
-            result,
-            Err(PageTableError::MappingRecursiveIndex(0xffff_ff80_0000_0000))
-        ));
+        assert_eq!(result, Err(PageTableError::MappingRecursiveIndex(0xffff_ff80_0000_0000)));
         assert!(table.entries.iter().all(|e| *e == Entry::empty()));
+    }
+
+    #[test]
+    fn map_to_already_mapped_should_error() {
+        let mut table = RootPageTable::empty();
+        let mut free_pages = [const { PhysPage4K([0; PAGE_SIZE_4K]) }; 4];
+        let mut test_page_allocator = TestPageAllocator::new(&mut free_pages);
+        let mut test_vmtrait_impl = IdentityVmTrait::default();
+
+        let mapped_virtrange = table
+            .map_phys_range(
+                &mut test_page_allocator,
+                &mut test_vmtrait_impl,
+                PhysRange::with_end(4096, 8 * 4096),
+                VaMapping::Offset(KZERO),
+                Entry::rw_kernel_data(),
+                PageSize::Page4K,
+                RootPageTableType::Kernel,
+            )
+            .expect("error:init:mapping failed");
+
+        assert_eq!(mapped_virtrange, VirtRange::new(KZERO + 4096, KZERO + 8 * 4096));
+
+        let result = table.map_phys_range(
+            &mut test_page_allocator,
+            &mut test_vmtrait_impl,
+            PhysRange::with_end(4096, 8 * 4096),
+            VaMapping::Offset(KZERO),
+            Entry::rw_kernel_data(),
+            PageSize::Page4K,
+            RootPageTableType::Kernel,
+        );
+
+        let expected_entry =
+            Entry::rw_kernel_data().with_phys_addr(PhysAddr::new(4096)).with_page_or_table(true);
+        assert_eq!(
+            result,
+            Err(PageTableError::AlreadyMapped(mapped_virtrange.start, expected_entry))
+        );
     }
 }
