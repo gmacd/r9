@@ -233,10 +233,8 @@ pub extern "C" fn init_vm(dtb_pa: u64) {
     //  [1] 0x00 - Device (Non-gathering, non-reordering, no early write acknowledgement (most restrictive))
     MAIR_EL1.set(0x00ff);
 
-    unsafe {
-        asm!("isb", options(nostack, preserves_flags));
-        invalidate_all_tlb_entries();
-    }
+    unsafe { asm!("isb", options(nostack, preserves_flags)) };
+    invalidate_all_tlb_entries();
 
     putstr("vminit:init_vm: complete\n");
 }

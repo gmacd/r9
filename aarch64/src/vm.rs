@@ -554,27 +554,42 @@ fn ttbr1_el1() -> PhysAddr {
 }
 
 pub unsafe fn switch(page_table: &RootPageTable, pgtype: RootPageTableType) {
-    unsafe {
-        let pt_phys = from_ptr_to_physaddr_offset_from_kzero(page_table).addr();
-        match pgtype {
-            RootPageTableType::User => switch_ttbr0(pt_phys),
-            RootPageTableType::Kernel => switch_ttbr1(pt_phys),
-        }
-
-        invalidate_all_tlb_entries();
+    let pt_phys = from_ptr_to_physaddr_offset_from_kzero(page_table).addr();
+    match pgtype {
+        RootPageTableType::User => unsafe { switch_ttbr0(pt_phys) },
+        RootPageTableType::Kernel => unsafe { switch_ttbr1(pt_phys) },
     }
+    invalidate_all_tlb_entries();
 }
 
 unsafe fn switch_ttbr0(pt_phys: u64) {
-    unsafe { asm!("dsb ishst", "msr ttbr0_el1, {pt_phys}", "isb", pt_phys = in(reg) pt_phys) };
+    unsafe {
+        asm!(
+            "dsb ishst",
+            "msr ttbr0_el1, {pt_phys}",
+            "isb",
+            pt_phys = in(reg) pt_phys,
+            options(nostack, preserves_flags)
+        )
+    };
 }
 
 unsafe fn switch_ttbr1(pt_phys: u64) {
-    unsafe { asm!("dsb ishst", "msr ttbr1_el1, {pt_phys}", "isb", pt_phys = in(reg) pt_phys) };
+    unsafe {
+        asm!(
+            "dsb ishst",
+            "msr ttbr1_el1, {pt_phys}",
+            "isb",
+            pt_phys = in(reg) pt_phys,
+            options(nostack, preserves_flags)
+        )
+    };
 }
 
-pub unsafe fn invalidate_all_tlb_entries() {
-    unsafe { asm!("dsb ishst", "tlbi vmalle1is", "dsb ish", "isb") };
+pub fn invalidate_all_tlb_entries() {
+    unsafe {
+        asm!("dsb ishst", "tlbi vmalle1is", "dsb ish", "isb", options(nostack, preserves_flags))
+    };
 }
 
 pub trait PageAllocator {
@@ -618,10 +633,16 @@ pub struct VmTraitImpl {}
 
 impl VmTrait for VmTraitImpl {
     fn write_entry(&self, dest_entry: &mut Entry, entry: Entry) {
+        debug_assert!(!dest_entry.valid());
         unsafe {
             write_volatile(dest_entry, entry);
-            invalidate_all_tlb_entries();
-        }
+
+            // Since the entry was previously invalid, no TLB holds it.
+            // To publish it we:
+            // - Make the store visible to table walkers
+            // - Discard previous faults on this address
+            asm!("dsb ishst", "isb", options(nostack, preserves_flags))
+        };
     }
 
     fn replace_recursive_entry(&mut self, pgtype: RootPageTableType, entry: Entry) -> Entry {
@@ -633,12 +654,9 @@ impl VmTrait for VmTraitImpl {
 
     fn write_recursive_entry(&mut self, pgtype: RootPageTableType, entry: Entry) {
         let page_table = root_page_table(pgtype);
-        unsafe {
-            // Return the recursive entry to its original state
-            write_volatile(&mut page_table.entries[511], entry);
-            // TODO Need to invalidate the single cache entry (+ optionally the recursive entry)
-            invalidate_all_tlb_entries();
-        }
+        unsafe { write_volatile(&mut page_table.entries[511], entry) };
+        // TODO Need to invalidate the single cache entry (+ optionally the recursive entry)
+        invalidate_all_tlb_entries();
     }
 
     fn generate_temp_recursive_address(&self, table: &Table) -> Entry {
@@ -665,6 +683,7 @@ pub struct IdentityVmTrait {
 
 impl VmTrait for IdentityVmTrait {
     fn write_entry(&self, dest_entry: &mut Entry, entry: Entry) {
+        debug_assert!(!dest_entry.valid());
         *dest_entry = entry;
     }
 
